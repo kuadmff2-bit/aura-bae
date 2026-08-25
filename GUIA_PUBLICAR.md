@@ -26,7 +26,7 @@ arquivo `wrangler.jsonc` precisa ficar na raiz do repositório.
 6. Em **Deploy command**, use `npm run deploy`.
 7. Salve e aguarde a implantação.
 
-O Wrangler provisionará o banco D1 chamado `aura-bae-db` e aplicará a migração.
+O Wrangler aplicará as migrações do banco D1 `aura-bae-db` antes de publicar a nova versão.
 
 ## 3. Cadastre os segredos no Cloudflare
 
@@ -101,15 +101,26 @@ O sistema só considera o Pix pago quando recebe `PAYMENT_RECEIVED`.
 
 ## 7. Teste com passageiro e motorista
 
-1. Cadastre um motorista com CPF, veículo e chave Pix.
-2. Entre como administrador e aprove o cadastro.
-3. No celular do motorista, permita a localização e fique disponível.
-4. Confira no mapa administrativo se o motorista aparece online.
-5. Em outro aparelho, cadastre um passageiro e solicite a corrida.
-6. O motorista aceita, inicia e confirma a chegada.
-7. Acompanhe a rota e a situação da corrida na Central de Operações.
-8. Nesse momento o QR Code Pix é criado.
-9. Após o webhook confirmar o recebimento, o passageiro avalia a corrida.
+1. Crie uma conta e, no perfil, ative o modo motorista com CPF, veículo, fotos e chave Pix.
+2. A ativação é automática; permita a localização e toque em **Ficar disponível**.
+3. Confira no mapa administrativo se o motorista aparece online.
+4. Em outro aparelho, cadastre um passageiro e solicite a corrida.
+5. O motorista aceita, inicia e confirma a chegada.
+6. Acompanhe a rota e a situação da corrida na Central de Operações.
+7. Nesse momento o QR Code Pix é criado.
+8. Após o webhook confirmar o recebimento, o passageiro avalia a corrida.
+
+Chamadas em busca ou aceitas que fiquem 5 minutos sem atualização são canceladas
+automaticamente. Corridas em andamento ou aguardando pagamento nunca são canceladas
+por esse temporizador.
+
+## Recuperação de senha pelo administrador
+
+1. O usuário toca em **Esqueci minha senha** e informa telefone e CPF.
+2. No painel administrativo, abra **Recuperações de senha** e toque em **Gerar link**.
+3. O WhatsApp abrirá com uma mensagem pronta para o telefone cadastrado.
+4. Envie a mensagem manualmente. O link vence em 15 minutos e só funciona uma vez.
+5. Quando a nova senha for salva, as sessões antigas da conta são encerradas.
 
 ## 8. Mude para produção
 
@@ -139,7 +150,7 @@ são compensadas nos próximos repasses.
 
 ## Importante antes de abrir ao público
 
-- Adicionar armazenamento R2 para as fotos do motorista e do veículo.
+- Para crescimento em produção, migrar as fotos do D1 para o Cloudflare R2.
 - Contratar um serviço de mapas/rotas com garantia para produção; o roteador público
   usado no projeto não oferece SLA comercial.
 - Publicar Termos de Uso e Política de Privacidade compatíveis com a LGPD.

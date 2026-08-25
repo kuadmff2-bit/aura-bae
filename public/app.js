@@ -1,7 +1,10 @@
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
 const digits = (value, limit = 20) => value.replace(/\D/g, "").slice(0, limit);
-const brl = value => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
+const brl = value => {
+  const amount = Number(value);
+  return Number.isFinite(amount) ? new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(amount) : "Calculando…";
+};
 const supportPhone = "5597991376123";
 const platformFee = 1.5;
 
@@ -14,6 +17,7 @@ const vehicles = {
 let liveDrivers = [];
 
 let currentUser = null;
+let currentMode = "passenger";
 let authMode = "login";
 let registerRole = "passenger";
 let selectedVehicle = "motocarro";
@@ -67,6 +71,23 @@ function initials(name) { return name.split(" ").map(part => part[0]).slice(0, 2
 function escapeHtml(value) { return String(value ?? "").replace(/[&<>'"]/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]); }
 function phoneText(phone) { return `(${phone.slice(0,2)}) ${phone.slice(2,7)}-${phone.slice(7)}`; }
 function pointText(point) { return point ? `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}` : "Toque no mapa para marcar"; }
+function cpfText(cpf) { const value = digits(cpf || "", 11); return value.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4"); }
+function setMessage(element, message, success = false) { element.textContent = message; element.classList.remove("hidden"); element.classList.toggle("success-message", success); }
+
+async function imageData(file) {
+  if (!file) return null;
+  if (!/^image\/(jpeg|png|webp)$/.test(file.type)) throw new Error("Escolha uma foto JPG, PNG ou WebP.");
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, 720 / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close?.();
+  const data = canvas.toDataURL("image/jpeg", .76);
+  if (data.length > 520000) throw new Error("A foto ficou muito grande. Escolha uma imagem mais leve.");
+  return data;
+}
 
 function distanceBetween(a, b) {
   const toRadians = value => value * Math.PI / 180;
@@ -118,7 +139,7 @@ function setAuthMode(mode) {
   $("#driver-register-fields").classList.toggle("hidden", mode !== "register" || registerRole !== "driver");
   $("#auth-kicker").textContent = mode === "login" ? "Bem-vindo de volta" : "Cadastro rápido";
   $("#auth-heading").textContent = mode === "login" ? "Entre na Aura Bae" : "Como você usará o aplicativo?";
-  $("#auth-submit").textContent = mode === "login" ? "Entrar no sistema" : registerRole === "driver" ? "Enviar cadastro" : "Criar minha conta";
+  $("#auth-submit").textContent = mode === "login" ? "Entrar no sistema" : registerRole === "driver" ? "Criar conta e começar" : "Criar minha conta";
   $("#auth-error").classList.add("hidden");
 }
 
@@ -147,6 +168,8 @@ $("#auth-form").addEventListener("submit", async event => {
   $("#auth-submit").disabled = true;
   const name = $("#auth-name").value.trim();
   try {
+    const profilePhoto = authMode === "register" && registerRole === "driver" ? await imageData($("#auth-profile-photo").files[0]) : undefined;
+    const vehiclePhoto = authMode === "register" && registerRole === "driver" ? await imageData($("#auth-vehicle-photo").files[0]) : undefined;
     const result = authMode === "login"
       ? await api("/api/auth/login", { method: "POST", body: { phone, password } })
       : await api("/api/auth/register", {
@@ -160,16 +183,54 @@ $("#auth-form").addEventListener("submit", async event => {
             vehicleType: registerRole === "driver" ? $("#auth-vehicle").value : undefined,
             vehicleModel: registerRole === "driver" ? $("#auth-vehicle-id").value.trim() : undefined,
             pixKeyType: registerRole === "driver" ? $("#auth-pix-type").value : undefined,
-            pixKey: registerRole === "driver" ? $("#auth-pix-key").value.trim() : undefined
+            pixKey: registerRole === "driver" ? $("#auth-pix-key").value.trim() : undefined,
+            profilePhoto,
+            vehiclePhoto
           }
         });
     enterApp(result.user);
   } catch (error) {
     showAuthError(error.message);
+    if (error.data?.field) document.getElementById(error.data.field)?.focus();
   } finally {
     $("#auth-submit").disabled = false;
   }
 });
+
+function showAuthCard(card) {
+  ["auth-card", "recovery-card", "reset-card", "setup-card"].forEach(id => document.getElementById(id)?.classList.toggle("hidden", id !== card));
+}
+
+$("#forgot-password").onclick = () => showAuthCard("recovery-card");
+$("#back-to-login").onclick = () => showAuthCard("auth-card");
+$("#recovery-phone").oninput = event => event.target.value = digits(event.target.value, 11);
+$("#recovery-cpf").oninput = event => {
+  const value = digits(event.target.value, 11);
+  event.target.value = value.replace(/(\d{3})(\d)/, "$1.$2").replace(/(\d{3})(\d)/, "$1.$2").replace(/(\d{3})(\d{1,2})$/, "$1-$2");
+};
+$("#recovery-form").onsubmit = async event => {
+  event.preventDefault();
+  const output = $("#recovery-message");
+  output.classList.add("hidden");
+  try {
+    const result = await api("/api/auth/recovery/request", { method: "POST", body: { phone: digits($("#recovery-phone").value, 11), cpf: digits($("#recovery-cpf").value, 11) } });
+    setMessage(output, result.message, true);
+  } catch (error) { setMessage(output, error.message); }
+};
+
+$("#reset-form").onsubmit = async event => {
+  event.preventDefault();
+  const password = $("#reset-password").value;
+  const output = $("#reset-error");
+  output.classList.add("hidden");
+  if (password !== $("#reset-password-confirm").value) return setMessage(output, "As duas senhas precisam ser iguais.");
+  try {
+    await api("/api/auth/recovery/complete", { method: "POST", body: { token: new URLSearchParams(location.search).get("reset"), password } });
+    history.replaceState({}, "", location.pathname);
+    showAuthCard("auth-card");
+    showAuthError("Senha alterada. Agora entre com a nova senha.");
+  } catch (error) { setMessage(output, error.message); }
+};
 
 $("#setup-cpf").addEventListener("input", event => {
   const value = digits(event.target.value, 11);
@@ -203,19 +264,26 @@ function enterApp(user) {
   currentUser = user;
   currentUser.vehicle = user.vehicleType;
   currentUser.vehicleId = user.vehicleModel;
-  currentUser.driverStatus = user.status;
+  currentUser.driverStatus = user.driverStatus;
+  currentMode = user.role === "admin" ? "admin" : "passenger";
   $("#auth-page").classList.add("hidden");
   $("#app-shell").classList.remove("hidden");
   $("#user-badge").textContent = initials(user.name);
   renderNav();
-  showView(user.role === "admin" ? "admin" : user.role === "driver" ? "driver" : "passenger");
-  if (user.role === "passenger") { $("#passenger-greeting").textContent = `Olá, ${user.name.split(" ")[0]}`; initializeMap(); resumePassengerRide(); }
-  if (user.role === "driver") { renderDriverProfile(); resumeDriverRide(); }
+  showView(user.role === "admin" ? "admin" : "passenger");
+  if (user.role !== "admin") {
+    $("#passenger-greeting").textContent = `Olá, ${user.name.split(" ")[0]}`;
+    initializeMap();
+    resumePassengerRide();
+    if (!user.tutorialSeen?.passenger) setTimeout(() => showTutorial("passenger"), 350);
+  }
+  if (user.canDrive) renderDriverProfile();
+  renderProfile();
   updateSupportLink();
 }
 
 function renderNav() {
-  const links = currentUser.role === "passenger" ? [["passenger", "Corrida"], ["support", "Suporte"]] : currentUser.role === "driver" ? [["driver", "Trabalho"], ["support", "Suporte"]] : [["admin", "Visão geral"], ["support", "Suporte"]];
+  const links = currentUser.role === "admin" ? [["admin", "Visão geral"], ["profile", "Perfil"], ["support", "Suporte"]] : [["passenger", "Corrida"], ...(currentUser.canDrive ? [["driver", "Trabalho"]] : []), ["profile", "Perfil"], ["support", "Suporte"]];
   $("#main-nav").innerHTML = links.map(([id, label]) => `<button data-view="${id}">${label}</button>`).join("");
   $$('#main-nav [data-view]').forEach(button => button.onclick = () => showView(button.dataset.view));
 }
@@ -225,10 +293,18 @@ function showView(id) {
   $$('#main-nav [data-view]').forEach(button => button.classList.toggle("active", button.dataset.view === id));
   window.scrollTo({ top: 0, behavior: "smooth" });
   if (id === "passenger") setTimeout(() => cityMap?.invalidateSize(), 80);
+  if (id === "passenger") currentMode = "passenger";
+  if (id === "driver") {
+    currentMode = "driver"; renderDriverProfile(); resumeDriverRide();
+    if (!currentUser.tutorialSeen?.driver) setTimeout(() => showTutorial("driver"), 250);
+  }
+  if (id === "profile") renderProfile();
   if (id === "admin") startAdminMonitoring();
   else clearInterval(adminPoller);
   if (id === "support") updateSupportLink();
 }
+
+$("#user-badge").onclick = () => showView("profile");
 
 $("#logout").addEventListener("click", async () => {
   clearInterval(ridePoller); clearInterval(driverPoller);
@@ -285,7 +361,7 @@ async function renderRoute() {
   routeDistance = routeDuration = null;
   $("#route-result").classList.add("hidden"); $("#map-message").classList.add("hidden");
   liveDrivers = [];
-  if (originPoint && currentUser?.role === "passenger") {
+  if (originPoint && currentUser?.role !== "admin") {
     try {
       const result = await api(`/api/drivers/nearby?vehicle=${encodeURIComponent(selectedVehicle)}&lat=${originPoint.lat}&lng=${originPoint.lng}`);
       liveDrivers = (result.drivers || []).map(driver => ({ ...driver, lat: driver.latitude, lng: driver.longitude }));
@@ -335,12 +411,24 @@ $("#pick-destination").onclick = () => { pickMode = "destination"; renderRoute()
 $("#swap").onclick = () => { [originPoint, destinationPoint] = [destinationPoint, originPoint]; renderRoute(); resetPassenger(); };
 $("#clear-route").onclick = () => { originPoint = destinationPoint = null; pickMode = "origin"; renderRoute(); resetPassenger(); };
 
-function fareValue() { const info = vehicles[selectedVehicle]; return routeDistance === null ? info.minimum : Math.ceil((info.minimum + Math.max(0, routeDistance - 2) * info.extraKm) * 2) / 2; }
+function fareValue() {
+  const info = vehicles[selectedVehicle];
+  const minimum = Number(info?.minimum), extraKm = Number(info?.extraKm), distance = Number(routeDistance);
+  if (!Number.isFinite(minimum) || !Number.isFinite(extraKm)) return null;
+  if (routeDistance === null) return minimum;
+  if (!Number.isFinite(distance) || distance <= 0) return null;
+  const fare = Math.ceil((minimum + Math.max(0, distance - 2) * extraKm) * 2) / 2;
+  return Number.isFinite(fare) ? fare : null;
+}
 function updatePrice() {
   const info = vehicles[selectedVehicle], fare = fareValue();
-  $("#fare").textContent = $("#fare-line").textContent = brl(fare); $("#total").textContent = brl(fare + platformFee);
-  $("#driver-share").textContent = brl(fare * .9); $("#platform-share").textContent = brl(fare * .1);
-  $("#fare-description").textContent = routeDistance === null ? `Mínimo para ${info.name.toLowerCase()}` : `${routeDistance.toFixed(1).replace(".", ",")} km pela rota viária`;
+  const valid = Number.isFinite(fare);
+  $("#fare").textContent = $("#fare-line").textContent = valid ? brl(fare) : "Calculando…";
+  $("#total").textContent = valid ? brl(fare + platformFee) : "Calculando…";
+  $("#driver-share").textContent = valid ? brl(fare * .9) : "—";
+  $("#platform-share").textContent = valid ? brl(fare * .1) : "—";
+  const distance = Number(routeDistance);
+  $("#fare-description").textContent = routeDistance === null ? `Mínimo para ${info.name.toLowerCase()}` : Number.isFinite(distance) ? `${distance.toFixed(1).replace(".", ",")} km pela rota viária` : "Aguardando uma rota válida";
 }
 
 $$('[data-vehicle]').forEach(button => button.onclick = () => {
@@ -358,7 +446,7 @@ function setStatus(label, title, text) {
 function resetPassenger() {
   clearTimeout(passengerTimer); passengerStep = "idle"; assignedDriver = "";
   $("#status-panel").classList.add("hidden"); $("#cancel-button").classList.add("hidden"); $("#payment-panel").innerHTML = "";
-  const ready = Boolean(routeDistance !== null), info = vehicles[selectedVehicle];
+  const ready = Number.isFinite(Number(routeDistance)) && Number(routeDistance) > 0 && Number.isFinite(fareValue()), info = vehicles[selectedVehicle];
   $("#action-button").classList.remove("hidden"); $("#action-button").disabled = !ready;
   $("#action-button").textContent = ready ? `Pedir ${info.name.toLowerCase()}` : "Marque a rota no mapa";
 }
@@ -392,7 +480,7 @@ $("#action-button").onclick = async () => {
 
 async function resumePassengerRide() {
   try {
-    const result = await api("/api/rides/current");
+    const result = await api("/api/rides/current?mode=passenger");
     if (!result.ride) return;
     activeRide = result.ride;
     selectedVehicle = activeRide.vehicleType;
@@ -409,11 +497,11 @@ function startPassengerPolling() {
   ridePoller = setInterval(async () => {
     if (!activeRide) return;
     try {
-      const result = await api(activeRide.status === "payment_pending" ? `/api/rides/${activeRide.id}/payment` : "/api/rides/current");
+      const result = await api(`/api/rides/${activeRide.id}/payment`);
       if (result.ride) {
         activeRide = result.ride;
         renderPassengerRide(activeRide, result.payment);
-      }
+      } else handleExpiredPassengerRide();
     } catch {}
   }, 3000);
 }
@@ -454,6 +542,17 @@ function renderPassengerRide(ride, payment = null) {
   } else if (ride.status === "paid") {
     clearInterval(ridePoller);
     showRating();
+  } else if (["cancelled", "completed"].includes(ride.status)) handleExpiredPassengerRide(ride);
+}
+
+function handleExpiredPassengerRide(ride = null) {
+  clearInterval(ridePoller);
+  activeRide = null;
+  setRideControlsLocked(false);
+  resetPassenger();
+  if (ride?.autoCancelled) {
+    $("#map-message").textContent = "A corrida ficou 5 minutos sem atualização e foi cancelada automaticamente. Você pode pedir novamente.";
+    $("#map-message").classList.remove("hidden");
   }
 }
 
@@ -498,9 +597,13 @@ function renderDriverProfile() {
   const info = vehicles[currentUser.vehicle || "mototaxi"];
   $("#driver-greeting").textContent = `Olá, ${currentUser.name.split(" ")[0]}`;
   $("#driver-category-name").textContent = info.name; $("#driver-vehicle-id").textContent = currentUser.vehicleId || "Veículo não informado";
-  if (currentUser.driverStatus !== "approved") {
-    $("#online-toggle").classList.add("hidden"); $("#driver-description").textContent = "Seu cadastro foi recebido e será analisado pela administração.";
-    $("#driver-panel").className = "empty pending-box"; $("#driver-panel").innerHTML = `<span>⌛</span><h2>Aguardando aprovação</h2><p>Assim que o administrador aprovar seu cadastro, o botão para ficar disponível será liberado.</p><a class="primary link-button fit" target="_blank" href="https://wa.me/${supportPhone}?text=${encodeURIComponent(`Olá, sou ${currentUser.name} e quero saber sobre meu cadastro na Aura Bae.`)}">Falar com o suporte</a>`;
+  if (!currentUser.canDrive) {
+    $("#online-toggle").classList.add("hidden");
+    const suspended = currentUser.driverStatus === "suspended";
+    $("#driver-description").textContent = suspended ? "Seu perfil de motorista está suspenso." : "Ative seu perfil de motorista na área de perfil.";
+    $("#driver-panel").className = "empty pending-box";
+    $("#driver-panel").innerHTML = suspended ? `<span>!</span><h2>Perfil de motorista suspenso</h2><p>Você continua podendo usar a conta como passageiro. Fale com o suporte para revisar a suspensão.</p>` : `<span>+</span><h2>Ative o modo motorista</h2><p>Abra seu perfil, adicione as fotos e os dados do veículo. A ativação é automática.</p><button id="open-driver-profile" class="primary fit">Abrir meu perfil</button>`;
+    $("#open-driver-profile")?.addEventListener("click", () => showView("profile"));
   } else { $("#online-toggle").classList.remove("hidden"); renderDriverIdle(); }
 }
 
@@ -532,10 +635,10 @@ function showDriverPayment() { showDriverStep("PIX", "Aguardando pagamento", "A 
 
 async function resumeDriverRide() {
   try {
-    const result = await api("/api/rides/current");
+    const result = await api("/api/rides/current?mode=driver");
     if (result.ride) {
       activeRide = result.ride; driverOnline = true;
-      $("#online-toggle").classList.add("active"); $("#online-toggle").innerHTML = "<i></i> Disponível";
+      $("#online-toggle").classList.add("active"); $("#online-toggle").innerHTML = "<i></i> Disponível agora";
       renderDriverRide(activeRide); startDriverPolling();
     }
   } catch {}
@@ -548,7 +651,7 @@ function startDriverPolling() {
   driverPoller = setInterval(async () => {
     if (!driverOnline) return;
     try {
-      const current = await api("/api/rides/current");
+      const current = await api("/api/rides/current?mode=driver");
       if (current.ride) { activeRide = current.ride; renderDriverRide(activeRide); return; }
       activeRide = null;
       const available = await api("/api/rides/available");
@@ -597,7 +700,7 @@ $("#online-toggle").onclick = async () => {
     }
     await api("/api/driver/status", { method: "POST", body: { online: nextOnline, latitude: coords.latitude, longitude: coords.longitude } });
     driverOnline = nextOnline;
-    $("#online-toggle").classList.toggle("active", driverOnline); $("#online-toggle").innerHTML = `<i></i> ${driverOnline ? "Disponível" : "Indisponível"}`;
+    $("#online-toggle").classList.toggle("active", driverOnline); $("#online-toggle").innerHTML = `<i></i> ${driverOnline ? "Disponível agora" : "Ficar disponível"}`;
     if (driverOnline) startDriverPolling(); else { clearInterval(driverPoller); clearInterval(locationPoller); renderDriverIdle(); }
   } catch (error) { alert(error.message || "Não foi possível acessar sua localização."); }
   finally { $("#online-toggle").disabled = false; }
@@ -706,28 +809,171 @@ async function renderAdmin() {
   if (adminRefreshRunning) return;
   adminRefreshRunning = true;
   try {
-    const [summary, result, operations] = await Promise.all([api("/api/admin/summary"), api("/api/admin/drivers"), api("/api/admin/operations")]);
-    const pending = result.drivers.filter(user => user.status === "pending");
+    const [summary, result, operations, recovery] = await Promise.all([api("/api/admin/summary"), api("/api/admin/drivers"), api("/api/admin/operations"), api("/api/admin/password-resets")]);
+    const drivers = result.drivers || [];
     $("#approved-count").textContent = summary.approvedDrivers;
-    $("#pending-count").textContent = `${summary.pendingDrivers} pendente${summary.pendingDrivers === 1 ? "" : "s"}`;
+    $("#pending-count").textContent = `${summary.approvedDrivers} ativo${summary.approvedDrivers === 1 ? "" : "s"}`;
     $("#ride-count").textContent = summary.rides;
-    $("#pending-drivers").innerHTML = pending.length ? pending.map(user => {
+    $("#pending-drivers").innerHTML = drivers.length ? drivers.map(user => {
       const vehicleName = vehicles[user.vehicle_type]?.name || "Veículo não informado";
-      return `<div><b>${escapeHtml(initials(user.name))}</b><p><strong>${escapeHtml(user.name)}</strong><span>${escapeHtml(vehicleName)} • ${escapeHtml(phoneText(user.phone))}</span></p><button data-reject="${user.id}" class="danger-mini">Recusar</button><button data-approve="${user.id}" class="approve-mini">Aprovar</button></div>`;
-    }).join("") : `<p class="muted">Nenhum cadastro aguardando análise.</p>`;
+      const active = user.driver_status === "approved";
+      const avatar = user.profile_photo ? `<img src="${user.profile_photo}" alt="Foto de ${escapeHtml(user.name)}">` : escapeHtml(initials(user.name));
+      return `<div><b class="admin-driver-photo">${avatar}</b><p><strong>${escapeHtml(user.name)}</strong><span>${escapeHtml(vehicleName)} • ${escapeHtml(phoneText(user.phone))}</span><small>${active ? "Motorista ativo" : user.driver_status === "suspended" ? "Suspenso" : "Inativo"}</small></p><button data-driver-action="${active ? "suspend" : "activate"}" data-driver-id="${user.id}" class="${active ? "danger-mini" : "approve-mini"}">${active ? "Suspender" : "Ativar"}</button></div>`;
+    }).join("") : `<p class="muted">Nenhum motorista cadastrado.</p>`;
+    const requests = recovery.requests || [];
+    $("#recovery-count").textContent = `${requests.length} pedido${requests.length === 1 ? "" : "s"}`;
+    $("#password-reset-list").innerHTML = requests.length ? requests.map(item => `<div><b>🔑</b><p><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(phoneText(item.phone))} • CPF final ${escapeHtml(String(item.cpf).slice(-4))}</span></p><button class="danger-mini" data-reset-reject="${item.id}">Recusar</button><button class="approve-mini" data-reset-approve="${item.id}">Gerar link</button></div>`).join("") : `<p class="muted">Nenhum pedido de recuperação aguardando atendimento.</p>`;
     await renderAdminOperations(operations);
   } catch (error) {
     $("#pending-drivers").innerHTML = `<p class="form-error">${escapeHtml(error.message)}</p>`;
     if ($("#operations-updated")) $("#operations-updated").textContent = "Falha ao atualizar";
   } finally { adminRefreshRunning = false; }
-  $$('[data-approve]').forEach(button => button.onclick = () => decideDriver(button.dataset.approve, "approved"));
-  $$('[data-reject]').forEach(button => button.onclick = () => decideDriver(button.dataset.reject, "rejected"));
+  $$('[data-driver-action]').forEach(button => button.onclick = () => decideDriver(button.dataset.driverId, button.dataset.driverAction));
+  $$('[data-reset-approve]').forEach(button => button.onclick = () => decidePasswordReset(button.dataset.resetApprove, "approve"));
+  $$('[data-reset-reject]').forEach(button => button.onclick = () => decidePasswordReset(button.dataset.resetReject, "reject"));
 }
 
-async function decideDriver(id, status) {
-  try { await api(`/api/admin/drivers/${id}/${status === "approved" ? "approve" : "reject"}`, { method: "POST" }); renderAdmin(); }
+async function decideDriver(id, action) {
+  try { await api(`/api/admin/drivers/${id}/${action}`, { method: "POST" }); renderAdmin(); }
   catch (error) { alert(error.message); }
 }
+
+async function decidePasswordReset(id, action) {
+  const whatsappWindow = action === "approve" ? window.open("about:blank", "_blank") : null;
+  try {
+    const result = await api(`/api/admin/password-resets/${id}/${action}`, { method: "POST" });
+    if (action === "approve") {
+      const text = `Olá, ${result.name}. Recebemos seu pedido de recuperação da Aura Bae. Use este link em até ${result.expiresInMinutes} minutos para criar uma nova senha: ${result.recoveryUrl}`;
+      if (whatsappWindow) whatsappWindow.location.href = `https://wa.me/55${result.phone}?text=${encodeURIComponent(text)}`;
+      else location.href = `https://wa.me/55${result.phone}?text=${encodeURIComponent(text)}`;
+    }
+    renderAdmin();
+  } catch (error) { whatsappWindow?.close(); alert(error.message); }
+}
+
+function renderProfile() {
+  if (!currentUser) return;
+  $("#profile-display-name").textContent = currentUser.name;
+  $("#profile-contact").textContent = `${phoneText(currentUser.phone)} • CPF ${cpfText(currentUser.cpf)}`;
+  $("#profile-name").value = currentUser.name;
+  $("#profile-avatar").innerHTML = currentUser.profilePhoto ? `<img src="${currentUser.profilePhoto}" alt="Sua foto">` : escapeHtml(initials(currentUser.name));
+  $("#profile-photo-preview").classList.toggle("hidden", !currentUser.profilePhoto);
+  if (currentUser.profilePhoto) $("#profile-photo-preview").src = currentUser.profilePhoto;
+  const driverForm = $("#driver-application-form");
+  driverForm.closest("article").classList.toggle("hidden", currentUser.role === "admin");
+  $("#replay-passenger-tutorial").classList.toggle("hidden", currentUser.role === "admin");
+  if (currentUser.role === "admin") return;
+  $("#driver-profile-title").textContent = currentUser.canDrive ? "Meu perfil de motorista" : "Também quer dirigir?";
+  $("#driver-profile-text").textContent = currentUser.canDrive ? "Atualize o veículo, as fotos ou a chave Pix quando precisar." : "Cadastre seus dados e comece a receber chamadas automaticamente.";
+  $("#driver-profile-vehicle").value = currentUser.vehicleType || "mototaxi";
+  $("#driver-profile-model").value = currentUser.vehicleModel || "";
+  $("#driver-profile-pix-type").value = currentUser.pixKeyType || "CPF";
+  $("#driver-application-submit").textContent = currentUser.canDrive ? "Salvar dados de motorista" : "Ativar perfil de motorista";
+  $("#replay-driver-tutorial").classList.toggle("hidden", !currentUser.canDrive);
+  const previews = [];
+  if (currentUser.profilePhoto) previews.push(`<figure><img src="${currentUser.profilePhoto}" alt="Foto do motorista"><figcaption>Motorista</figcaption></figure>`);
+  if (currentUser.vehiclePhoto) previews.push(`<figure><img src="${currentUser.vehiclePhoto}" alt="Foto do veículo"><figcaption>Veículo</figcaption></figure>`);
+  $("#driver-photo-previews").innerHTML = previews.join("");
+}
+
+$("#profile-photo").onchange = async event => {
+  try {
+    const data = await imageData(event.target.files[0]);
+    $("#profile-photo-preview").src = data;
+    $("#profile-photo-preview").classList.remove("hidden");
+  } catch (error) { setMessage($("#profile-error"), error.message); }
+};
+
+$("#profile-form").onsubmit = async event => {
+  event.preventDefault();
+  const output = $("#profile-error"); output.classList.add("hidden");
+  try {
+    const result = await api("/api/profile", { method: "PATCH", body: { name: $("#profile-name").value, profilePhoto: await imageData($("#profile-photo").files[0]) } });
+    currentUser = result.user;
+    currentUser.vehicle = currentUser.vehicleType; currentUser.vehicleId = currentUser.vehicleModel;
+    $("#user-badge").textContent = initials(currentUser.name);
+    renderProfile();
+    setMessage(output, "Perfil atualizado.", true);
+  } catch (error) { setMessage(output, error.message); }
+};
+
+$("#driver-application-form").onsubmit = async event => {
+  event.preventDefault();
+  const output = $("#driver-profile-error"); output.classList.add("hidden");
+  const submit = $("#driver-application-submit"); submit.disabled = true;
+  try {
+    const result = await api("/api/driver/apply", { method: "POST", body: {
+      vehicleType: $("#driver-profile-vehicle").value,
+      vehicleModel: $("#driver-profile-model").value,
+      pixKeyType: $("#driver-profile-pix-type").value,
+      pixKey: $("#driver-profile-pix-key").value,
+      profilePhoto: await imageData($("#driver-profile-photo").files[0]),
+      vehiclePhoto: await imageData($("#driver-vehicle-photo").files[0])
+    } });
+    currentUser = result.user;
+    currentUser.vehicle = currentUser.vehicleType; currentUser.vehicleId = currentUser.vehicleModel;
+    renderNav(); renderProfile(); renderDriverProfile();
+    setMessage(output, "Perfil de motorista ativo. Você já pode ficar disponível.", true);
+    showTutorial("driver");
+  } catch (error) {
+    setMessage(output, error.message);
+    if (error.data?.field) document.getElementById(error.data.field)?.focus();
+  } finally { submit.disabled = false; }
+};
+
+$("#change-password-form").onsubmit = async event => {
+  event.preventDefault();
+  const output = $("#password-change-error"); output.classList.add("hidden");
+  const next = $("#new-password").value;
+  if (next !== $("#confirm-new-password").value) return setMessage(output, "As duas novas senhas precisam ser iguais.");
+  try {
+    await api("/api/profile/password", { method: "POST", body: { currentPassword: $("#current-password").value, newPassword: next } });
+    event.target.reset();
+    setMessage(output, "Senha alterada. As outras sessões foram encerradas.", true);
+  } catch (error) { setMessage(output, error.message); }
+};
+
+const tutorials = {
+  passenger: [
+    ["A", "Escolha como viajar", "Selecione Mototáxi, Motocarro ou Carro antes de montar sua rota."],
+    ["A→B", "Marque no mapa", "Toque primeiro na saída e depois no destino. O sistema calcula a rota pelas ruas."],
+    ["MT", "Aguarde um motorista", "A chamada aparece somente para motoristas ativos daquela categoria e próximos de você."],
+    ["PIX", "Pague no destino", "O Pix ou o pagamento em dinheiro só é solicitado depois que o motorista confirma a chegada."]
+  ],
+  driver: [
+    ["ON", "Fique disponível", "Ative o botão grande e permita a localização para receber chamadas próximas."],
+    ["A", "Aceite a chamada", "Confira a distância até o passageiro e o valor líquido antes de aceitar."],
+    ["B", "Atualize cada etapa", "Confirme o embarque e depois a chegada. Corridas aceitas sem atividade expiram em 5 minutos."],
+    ["R$", "Confirme com cuidado", "No dinheiro, confirme após receber. No Pix, aguarde a confirmação automática."]
+  ]
+};
+let tutorialMode = "passenger", tutorialStep = 0;
+
+function showTutorial(mode = "passenger") {
+  if (!tutorials[mode]) return;
+  tutorialMode = mode; tutorialStep = 0;
+  $("#tutorial-modal").classList.remove("hidden");
+  renderTutorialStep();
+}
+function renderTutorialStep() {
+  const slides = tutorials[tutorialMode], [icon, title, text] = slides[tutorialStep];
+  $("#tutorial-step-label").textContent = `${tutorialMode === "driver" ? "Motorista" : "Passageiro"} • Passo ${tutorialStep + 1} de ${slides.length}`;
+  $("#tutorial-icon").textContent = icon; $("#tutorial-title").textContent = title; $("#tutorial-text").textContent = text;
+  $("#tutorial-dots").innerHTML = slides.map((_, index) => `<i class="${index === tutorialStep ? "active" : ""}"></i>`).join("");
+  $("#tutorial-next").textContent = tutorialStep === slides.length - 1 ? "Entendi" : "Continuar";
+}
+async function closeTutorial() {
+  $("#tutorial-modal").classList.add("hidden");
+  if (currentUser) {
+    currentUser.tutorialSeen ||= {};
+    currentUser.tutorialSeen[tutorialMode] = true;
+    try { await api("/api/profile/tutorial", { method: "POST", body: { mode: tutorialMode } }); } catch {}
+  }
+}
+$("#tutorial-next").onclick = () => { if (tutorialStep < tutorials[tutorialMode].length - 1) { tutorialStep++; renderTutorialStep(); } else closeTutorial(); };
+$("#tutorial-skip").onclick = closeTutorial;
+$("#replay-passenger-tutorial").onclick = () => showTutorial("passenger");
+$("#replay-driver-tutorial").onclick = () => showTutorial("driver");
 
 function updateSupportLink() {
   if (!currentUser) return;
@@ -739,6 +985,11 @@ $("#support-topic").onchange = updateSupportLink; $("#support-message").oninput 
 
 (async () => {
   try {
+    const resetToken = new URLSearchParams(location.search).get("reset");
+    if (resetToken) {
+      showAuthCard("reset-card");
+      return;
+    }
     const setup = await api("/api/setup/status");
     if (setup.needsAdmin) {
       $("#auth-card").classList.add("hidden");
