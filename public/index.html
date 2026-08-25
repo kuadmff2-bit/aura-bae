@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0d5c46">
+  <meta name="description" content="Aura Bae: mobilidade local para passageiros e motoristas de Barreirinha-AM.">
+  <title>Aura Bae | Mobilidade local</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <section id="auth-page" class="auth-page">
+    <header class="auth-top">
+      <a class="brand" href="#"><span class="logo">A</span><span><strong>Aura Bae</strong><small>Barreirinha • AM</small></span></a>
+      <button class="theme-toggle" data-theme-toggle aria-label="Mudar tema">☾ <span>Escuro</span></button>
+    </header>
+    <div class="auth-layout">
+      <div class="auth-intro"><span class="green-label">Mobilidade para cidade pequena</span><h1>Corridas locais, simples e seguras.</h1><p>Passageiros e motoristas de Barreirinha conectados em um sistema feito para o celular.</p></div>
+      <article id="auth-card" class="auth-card">
+        <div class="auth-tabs"><button class="active" data-auth-mode="login">Entrar</button><button data-auth-mode="register">Criar conta</button></div>
+        <div class="auth-title"><small id="auth-kicker">Bem-vindo de volta</small><h2 id="auth-heading">Entre na Aura Bae</h2></div>
+        <form id="auth-form">
+          <div id="register-fields" class="hidden"><div class="role-choice"><button type="button" class="active" data-register-role="passenger"><b>Passageiro</b><small>Quero pedir corridas</small></button><button type="button" data-register-role="driver"><b>Motorista</b><small>Quero receber chamadas</small></button></div><label>Nome completo<input id="auth-name" autocomplete="name" placeholder="Seu nome completo"></label><label>CPF<input id="auth-cpf" inputmode="numeric" maxlength="14" placeholder="000.000.000-00"></label></div>
+          <label>Telefone<div class="phone-fields"><input id="auth-ddd" value="92" inputmode="numeric" maxlength="2" aria-label="DDD" autocomplete="off"><input id="auth-number" inputmode="numeric" maxlength="9" placeholder="00000-0000" aria-label="Número" autocomplete="off"></div></label>
+          <label>Senha<div class="password-field"><input id="auth-password" type="password" minlength="8" placeholder="Mínimo de 8 caracteres"><button id="toggle-password" type="button" aria-label="Mostrar senha" aria-pressed="false">Mostrar</button></div></label>
+          <div id="driver-register-fields" class="hidden"><label>Categoria<select id="auth-vehicle"><option value="mototaxi">Mototáxi</option><option value="motocarro">Motocarro</option><option value="taxi">Carro</option></select></label><label>Modelo e identificação do veículo<input id="auth-vehicle-id" placeholder="Ex.: Honda Pop 110i vermelha"></label><label>Tipo da chave Pix<select id="auth-pix-type"><option value="CPF">CPF</option><option value="PHONE">Telefone</option><option value="EMAIL">E-mail</option><option value="EVP">Chave aleatória</option></select></label><label>Chave Pix para receber repasses<input id="auth-pix-key" placeholder="Digite sua chave Pix"></label></div>
+          <p id="auth-error" class="form-error hidden"></p><button id="auth-submit" class="primary" type="submit">Entrar no sistema</button>
+        </form>
+      </article>
+      <article id="setup-card" class="auth-card hidden">
+        <div class="auth-title"><small>Primeiro acesso</small><h2>Configurar administrador</h2></div>
+        <p class="muted">Faça isso apenas uma vez, logo após publicar o backend.</p>
+        <form id="setup-form">
+          <label>Token de configuração<input id="setup-token" type="password" autocomplete="off" placeholder="Token salvo no Cloudflare"></label>
+          <label>Nome completo<input id="setup-name" value="Carlos Olímpio" autocomplete="name"></label>
+          <label>Telefone<input id="setup-phone" inputmode="numeric" value="97991376123"></label>
+          <label>CPF<input id="setup-cpf" inputmode="numeric" maxlength="14" placeholder="000.000.000-00"></label>
+          <label>Crie sua senha de administrador<input id="setup-password" type="password" minlength="8" placeholder="Mínimo de 8 caracteres"></label>
+          <p id="setup-error" class="form-error hidden"></p>
+          <button class="primary" type="submit">Criar administrador</button>
+        </form>
+      </article>
+    </div>
+  </section>
+
+  <div id="app-shell" class="hidden">
+    <header class="app-header"><a class="brand" href="#top"><span class="logo">A</span><span><strong>Aura Bae</strong><small>Barreirinha • AM</small></span></a><nav id="main-nav" class="role-nav" aria-label="Navegação"></nav><div class="header-actions"><button class="theme-toggle" data-theme-toggle aria-label="Mudar tema">☾ <span>Escuro</span></button><span id="user-badge" class="user-badge">AB</span><button id="logout" class="logout">Sair</button></div></header>
+    <main id="top">
+      <section id="passenger" class="view">
+        <div class="workspace"><div class="main-column">
+          <div class="heading"><span>Passageiro</span><h1 id="passenger-greeting">Para onde você vai?</h1><p>Marque a saída e o destino diretamente no mapa de Barreirinha.</p></div>
+          <article class="card vehicle-card"><div class="card-title"><div><small>Transporte</small><h2>Como você quer ir?</h2></div><b>Condutores disponíveis</b></div><div class="vehicle-grid" role="group" aria-label="Transporte"><button data-vehicle="mototaxi"><span>MT</span><div><strong>Mototáxi</strong><small>Individual • mínimo R$ 7</small></div><i>online</i></button><button class="active" data-vehicle="motocarro"><span>MC</span><div><strong>Motocarro</strong><small>Local • mínimo R$ 10</small></div><i>online</i></button><button data-vehicle="taxi"><span>CR</span><div><strong>Carro</strong><small>Confortável • mínimo R$ 12</small></div><i>online</i></button></div></article>
+          <article class="card route-card"><div class="route-instruction"><small>Rota pelas ruas</small><strong id="route-instruction">1. Toque no local de saída</strong><span>Escolha os dois pontos somente tocando no mapa.</span></div><div class="map-toolbar"><button id="pick-origin" class="active"><i>A</i> Marcar saída</button><button id="pick-destination"><i>B</i> Marcar destino</button><button id="swap" disabled>⇅ Inverter</button><button id="clear-route" disabled>Limpar</button></div><div class="point-summary"><div><i>A</i><p><span>Saída</span><strong id="origin-label">Toque no mapa para marcar</strong></p></div><div><i>B</i><p><span>Destino</span><strong id="destination-label">Toque no mapa para marcar</strong></p></div></div><label class="payment-choice">Pagamento<select id="payment-method"><option value="PIX">Pix no destino</option><option value="CASH">Dinheiro no destino</option></select></label></article>
+          <div class="city-map-shell"><div id="city-map" class="city-map" aria-label="Mapa de Barreirinha"></div><span id="map-chip" class="map-chip">3 motocarros disponíveis</span><div id="map-message" class="map-message hidden"></div></div><div id="nearby-driver" class="nearby-driver"></div><div id="route-result" class="route-result hidden"></div><div id="status-panel" class="status-panel hidden" aria-live="polite"></div>
+        </div><aside><article class="card summary"><div class="transport-title"><span id="transport-code">MC</span><div><small>Transporte escolhido</small><strong id="transport-name">Motocarro</strong></div></div><div class="price"><small>Valor estimado</small><strong id="fare">R$ 10,00</strong><span id="fare-description">Mínimo para motocarro</span></div><div class="lines"><div><span>Corrida</span><b id="fare-line">R$ 10,00</b></div><div><span>Taxa da plataforma</span><b>R$ 1,50</b></div><div class="total"><span>Total no destino</span><b id="total">R$ 11,50</b></div></div><div id="payment-panel"></div><button id="action-button" class="primary" disabled>Marque a rota no mapa</button><button id="cancel-button" class="secondary hidden">Cancelar busca</button><p class="safe">Pagamento solicitado somente ao chegar no destino.</p></article><article class="card split"><small>Divisão da corrida</small><div><span>Motorista (90%)</span><b id="driver-share">R$ 9,00</b></div><div><span>Aura Bae (10%)</span><b id="platform-share">R$ 1,00</b></div><div><span>Taxa fixa</span><b>R$ 1,50</b></div></article></aside></div>
+      </section>
+      <section id="driver" class="view"><div class="workspace"><div class="main-column"><div class="heading driver-heading"><div><span>Motorista</span><h1 id="driver-greeting">Olá</h1><p id="driver-description">Receba somente chamadas da sua categoria.</p></div><button id="online-toggle" class="online"><i></i> Indisponível</button></div><div class="stats"><article><small>Hoje</small><strong>0 corridas</strong><span>Nenhuma corrida realizada</span></article><article><small>Ganhos líquidos</small><strong>R$ 0,00</strong><span>Sem ganhos registrados</span></article><article><small>Avaliação</small><strong>—</strong><span>Sem avaliações</span></article></div><article id="driver-panel" class="empty"></article></div><aside><article class="card summary"><small class="green-label">Cadastro</small><h2 id="driver-category-name">Motocarro</h2><p id="driver-vehicle-id" class="muted"></p><div class="lines"><div><span>Comissão</span><b>10%</b></div><div><span>Taxa fixa do passageiro</span><b>R$ 1,50</b></div></div></article></aside></div></section>
+      <section id="admin" class="view"><div class="admin-wrap"><div class="heading"><span>Administrador</span><h1>Visão geral da Aura Bae</h1><p>Carlos Olímpio • kuadmff2@gmail.com</p></div><div class="admin-stats"><article><small>Motoristas aprovados</small><strong id="approved-count">1</strong><span>Cadastros locais</span></article><article><small>Pendentes</small><strong id="pending-count">1</strong><span>Aguardando análise</span></article><article><small>Corridas registradas</small><strong id="ride-count">0</strong><span>Total da operação</span></article><article><small>Comissão</small><strong>10%</strong><span>+ R$ 1,50</span></article></div><div class="admin-grid"><article class="card"><div class="card-title"><div><small>Análise</small><h2>Cadastros de motoristas</h2></div></div><div id="pending-drivers" class="driver-list"></div></article><article class="card"><div class="card-title"><div><small>Preços</small><h2>Valores mínimos</h2></div></div><div class="fare-list"><div><span>Mototáxi</span><b>R$ 7,00</b></div><div><span>Motocarro</span><b>R$ 10,00</b></div><div><span>Carro</span><b>R$ 12,00</b></div></div></article></div></div></section>
+      <section id="support" class="view"><div class="admin-wrap"><div class="heading"><span>Ajuda</span><h1>Suporte Aura Bae</h1><p>Atendimento pelo WhatsApp para passageiros e motoristas.</p></div><article class="card support-card"><span class="support-icon">WA</span><h2>(97) 99137-6123</h2><p>Escolha um assunto, escreva os detalhes e abra a conversa com os dados já preenchidos.</p><label>Assunto<select id="support-topic"><option>Problema com uma corrida</option><option>Pagamento não confirmado</option><option>Cadastro de motorista</option><option>Problema para entrar</option><option>Outro assunto</option></select></label><label>Detalhes<textarea id="support-message" rows="5" placeholder="Conte o que aconteceu"></textarea></label><a id="support-link" class="primary link-button" target="_blank" rel="noreferrer">Abrir conversa no WhatsApp</a></article></div></section>
+    </main>
+    <footer><span class="logo small">A</span><p><strong>Aura Bae</strong> • Mobilidade local em Barreirinha-AM</p><small>Atendimento e suporte: (97) 99137-6123.</small></footer>
+  </div>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

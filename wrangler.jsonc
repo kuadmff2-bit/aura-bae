@@ -1,0 +1,34 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "aura-bae-api",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-08-25",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/webhooks/*"]
+  },
+  "vars": {
+    "ASAAS_ENVIRONMENT": "sandbox",
+    "SUPPORT_PHONE": "5597991376123",
+    "ADMIN_NAME": "Carlos Olímpio",
+    "ADMIN_PHONE": "97991376123",
+    "PLATFORM_PERCENT": "10",
+    "PLATFORM_FIXED_FEE": "1.50",
+    "AUTOMATIC_PAYOUTS_ENABLED": "false"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "aura-bae-db",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "triggers": {
+    "crons": ["15 4 * * *"]
+  },
+  "observability": {
+    "enabled": true
+  }
+}
