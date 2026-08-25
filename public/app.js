@@ -481,7 +481,7 @@ function enterApp(user) {
   currentMode = user.role === "admin" ? "admin" : "passenger";
   $("#auth-page").classList.add("hidden");
   $("#app-shell").classList.remove("hidden");
-  $("#user-badge").textContent = initials(user.name);
+  renderUserBadge();
   renderNav();
   showView(user.role === "admin" ? "admin" : "passenger");
   if (user.role !== "admin") {
@@ -493,6 +493,13 @@ function enterApp(user) {
   if (user.canDrive) renderDriverProfile();
   renderProfile();
   updateSupportLink();
+}
+
+function renderUserBadge() {
+  if (!currentUser) return;
+  $("#user-badge").innerHTML = currentUser.profilePhoto
+    ? `<img src="${escapeHtml(currentUser.profilePhoto)}" alt="Foto de ${escapeHtml(currentUser.name)}">`
+    : escapeHtml(initials(currentUser.name));
 }
 
 function renderNav() {
@@ -863,10 +870,10 @@ function renderPassengerRide(ride, payment = null) {
     if (ride.paymentMethod === "CASH") {
       $("#payment-panel").innerHTML = `<div class="payment-pending"><span>R$</span><h3>Pagamento em dinheiro</h3><p>Entregue ${brl(ride.totalCents / 100)} ao motorista. Ele confirmará o recebimento.</p></div>`;
     } else if (payment) renderPixPayment(payment, ride);
-  } else if (ride.status === "paid") {
+  } else if (["paid", "completed"].includes(ride.status)) {
     clearInterval(ridePoller);
     showRating();
-  } else if (["cancelled", "completed"].includes(ride.status)) return handleExpiredPassengerRide(ride);
+  } else if (ride.status === "cancelled") return handleExpiredPassengerRide(ride);
   renderAssignedDriver(ride.driver, ride.status);
   updateDriverTracking(ride);
 }
@@ -895,16 +902,17 @@ function renderPixPayment(payment, ride) {
 }
 
 function showRating() {
-  passengerStep = "rating"; $("#action-button").classList.add("hidden");
-  $("#payment-panel").innerHTML = `<div class="rating-box"><span>Avalie seu motorista</span><strong>Como foi a corrida?</strong><div>${[1,2,3,4,5].map(n => `<button data-star="${n}">★</button>`).join("")}</div><button id="send-rating" class="primary" disabled>Enviar avaliação</button></div>`;
+  passengerStep = "done";
+  $("#action-button").classList.remove("hidden");
+  $("#action-button").disabled = false;
+  $("#action-button").textContent = "Pedir outra corrida";
+  $("#payment-panel").innerHTML = `<div class="success-box"><span>✓</span><h3>Corrida concluída</h3><p>Pagamento confirmado. A avaliação é opcional.</p></div><div class="rating-box"><span>Se quiser, avalie o motorista</span><strong>Como foi a corrida?</strong><div>${[1,2,3,4,5].map(n => `<button data-star="${n}">★</button>`).join("")}</div><button id="send-rating" class="secondary" disabled>Enviar avaliação</button></div>`;
   let selectedRating = 0;
   $$('[data-star]').forEach(button => button.onclick = () => { selectedRating = Number(button.dataset.star); $$('[data-star]').forEach(star => star.classList.toggle("active", Number(star.dataset.star) <= selectedRating)); $("#send-rating").disabled = false; });
   $("#send-rating").onclick = async () => {
     try {
       await api(`/api/rides/${activeRide.id}/rate`, { method: "POST", body: { stars: selectedRating } });
-      passengerStep = "done";
-      $("#payment-panel").innerHTML = `<div class="success-box"><span>✓</span><h3>Corrida concluída</h3><p>Pagamento confirmado e avaliação enviada.</p></div>`;
-      $("#action-button").classList.remove("hidden"); $("#action-button").disabled = false; $("#action-button").textContent = "Pedir outra corrida";
+      $(".rating-box").innerHTML = `<span>Obrigado!</span><strong>Avaliação enviada.</strong>`;
     } catch (error) { alert(error.message); }
   };
 }
@@ -1013,8 +1021,8 @@ function renderDriverRide(ride) {
       catch (error) { alert(error.message); }
     });
   } else if (["arrived", "payment_pending"].includes(ride.status)) showDriverPayment();
-  else if (ride.status === "paid") {
-    showDriverStep("✓", "Pagamento confirmado", "A corrida foi paga. O passageiro já pode avaliar.", "Aguardando avaliação", null, true);
+  else if (["paid", "completed"].includes(ride.status)) {
+    showDriverStep("✓", "Corrida finalizada", "Pagamento confirmado. Você já pode receber uma nova chamada.", "Finalizada", null, true);
   }
 }
 
@@ -1040,7 +1048,8 @@ const operationStatusLabels = {
   in_progress: "Em andamento",
   arrived: "Chegou ao destino",
   payment_pending: "Aguardando pagamento",
-  paid: "Pago • aguardando avaliação"
+  paid: "Pagamento confirmado",
+  completed: "Finalizada"
 };
 
 function initializeAdminMap() {
@@ -1220,6 +1229,7 @@ function renderProfile() {
   $("#profile-contact").textContent = `${phoneText(currentUser.phone)} • CPF ${cpfText(currentUser.cpf)}`;
   $("#profile-name").value = currentUser.name;
   $("#profile-avatar").innerHTML = currentUser.profilePhoto ? `<img src="${currentUser.profilePhoto}" alt="Sua foto">` : escapeHtml(initials(currentUser.name));
+  renderUserBadge();
   $("#profile-photo-preview").classList.toggle("hidden", !currentUser.profilePhoto);
   if (currentUser.profilePhoto) $("#profile-photo-preview").src = currentUser.profilePhoto;
   if (!croppedPhotoData.has("profile-photo")) updatePhotoPicker($("#profile-photo"), currentUser.profilePhoto, "Foto atual");
@@ -1234,11 +1244,11 @@ function renderProfile() {
   $("#driver-profile-pix-type").value = currentUser.pixKeyType || "CPF";
   $("#driver-application-submit").textContent = currentUser.canDrive ? "Salvar dados de motorista" : "Ativar perfil de motorista";
   $("#replay-driver-tutorial").classList.toggle("hidden", !currentUser.canDrive);
+  $("#open-pix-settings").classList.toggle("hidden", currentUser.role === "admin");
+  $("#open-pix-settings strong").textContent = currentUser.canDrive ? "Mudar chave Pix" : "Cadastrar chave Pix";
   const previews = [];
-  if (currentUser.profilePhoto) previews.push(`<figure><img src="${currentUser.profilePhoto}" alt="Foto do motorista"><figcaption>Motorista</figcaption></figure>`);
   if (currentUser.vehiclePhoto) previews.push(`<figure><img src="${currentUser.vehiclePhoto}" alt="Foto do veículo"><figcaption>Veículo</figcaption></figure>`);
   $("#driver-photo-previews").innerHTML = previews.join("");
-  if (!croppedPhotoData.has("driver-profile-photo")) updatePhotoPicker($("#driver-profile-photo"), currentUser.profilePhoto, "Foto atual");
   if (!croppedPhotoData.has("driver-vehicle-photo")) updatePhotoPicker($("#driver-vehicle-photo"), currentUser.vehiclePhoto, "Foto atual");
 }
 
@@ -1250,7 +1260,7 @@ $("#profile-form").onsubmit = async event => {
     currentUser = result.user;
     currentUser.vehicle = currentUser.vehicleType; currentUser.vehicleId = currentUser.vehicleModel;
     croppedPhotoData.delete("profile-photo");
-    $("#user-badge").textContent = initials(currentUser.name);
+    renderUserBadge();
     renderProfile();
     setMessage(output, "Perfil atualizado.", true);
   } catch (error) { setMessage(output, error.message); }
@@ -1266,12 +1276,10 @@ $("#driver-application-form").onsubmit = async event => {
       vehicleModel: $("#driver-profile-model").value,
       pixKeyType: $("#driver-profile-pix-type").value,
       pixKey: $("#driver-profile-pix-key").value,
-      profilePhoto: await selectedPhotoData("driver-profile-photo"),
       vehiclePhoto: await selectedPhotoData("driver-vehicle-photo")
     } });
     currentUser = result.user;
     currentUser.vehicle = currentUser.vehicleType; currentUser.vehicleId = currentUser.vehicleModel;
-    croppedPhotoData.delete("driver-profile-photo");
     croppedPhotoData.delete("driver-vehicle-photo");
     renderNav(); renderProfile(); renderDriverProfile();
     setMessage(output, "Perfil de motorista ativo. Você já pode ficar disponível.", true);
@@ -1280,6 +1288,32 @@ $("#driver-application-form").onsubmit = async event => {
     setMessage(output, error.message);
     if (error.data?.field) document.getElementById(error.data.field)?.focus();
   } finally { submit.disabled = false; }
+};
+
+function openSettingsPanel(panelId) {
+  ["password-settings-panel", "pix-settings-panel"].forEach(id => $("#" + id).classList.toggle("hidden", id !== panelId));
+  $("#" + panelId).scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+$("#open-password-settings").onclick = () => openSettingsPanel("password-settings-panel");
+$("#open-pix-settings").onclick = () => openSettingsPanel("pix-settings-panel");
+$$('[data-close-settings]').forEach(button => button.onclick = () => $("#" + button.dataset.closeSettings).classList.add("hidden"));
+
+$("#change-pix-form").onsubmit = async event => {
+  event.preventDefault();
+  const output = $("#pix-change-error"); output.classList.add("hidden");
+  const pixKey = $("#driver-profile-pix-key").value.trim();
+  if (!pixKey) return setMessage(output, "Digite a nova chave Pix.");
+  try {
+    if (currentUser.canDrive) {
+      const result = await api("/api/profile/pix", { method: "POST", body: { pixKeyType: $("#driver-profile-pix-type").value, pixKey } });
+      currentUser = result.user;
+      $("#driver-profile-pix-key").value = "";
+      setMessage(output, "Chave Pix alterada com sucesso.", true);
+    } else {
+      setMessage(output, "Chave preparada. Agora salve o cadastro de motorista.", true);
+    }
+  } catch (error) { setMessage(output, error.message); }
 };
 
 $("#change-password-form").onsubmit = async event => {

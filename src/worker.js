@@ -89,6 +89,7 @@ async function routeApi(request, env, ctx, url) {
   if (pathname === "/api/auth/recovery/complete" && request.method === "POST") return completePasswordRecovery(request, env);
   if (pathname === "/api/profile" && request.method === "PATCH") return updateProfile(request, env);
   if (pathname === "/api/profile/password" && request.method === "POST") return changePassword(request, env);
+  if (pathname === "/api/profile/pix" && request.method === "POST") return changePixKey(request, env);
   if (pathname === "/api/profile/tutorial" && request.method === "POST") return markTutorialSeen(request, env);
   if (pathname === "/api/driver/apply" && request.method === "POST") return applyAsDriver(request, env);
   if (pathname === "/api/driver/status" && request.method === "POST") return updateDriverStatus(request, env);
@@ -251,6 +252,21 @@ async function applyAsDriver(request, env) {
     pix_key = ?, pix_key_type = ?, profile_photo = ?, vehicle_photo = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
     .bind(vehicleType, vehicleModel, pixKey, pixKeyType, profilePhoto, vehiclePhoto, user.id).run();
   return json({ user: publicUser(await getUserById(env, user.id)), activated: true });
+}
+
+async function changePixKey(request, env) {
+  const user = await requirePassengerAccount(request, env);
+  if (user instanceof Response) return user;
+  if (!user.vehicle_type || driverStatus(user) === "suspended") return json({ error: "Ative seu perfil de motorista antes de alterar a chave Pix." }, 403);
+  const body = await readJson(request);
+  const pixKeyType = ["CPF", "CNPJ", "EMAIL", "PHONE", "EVP"].includes(body?.pixKeyType) ? body.pixKeyType : null;
+  const pixKey = cleanText(body?.pixKey, 120);
+  if (!pixKey || !pixKeyType) return fieldError("driverPixKey", "Informe a nova chave Pix e o tipo.");
+  const pixOwner = await env.DB.prepare("SELECT id FROM users WHERE pix_key = ? AND id != ? LIMIT 1").bind(pixKey, user.id).first();
+  if (pixOwner) return fieldError("driverPixKey", "Esta chave Pix já está sendo utilizada em outro cadastro.", 409);
+  await env.DB.prepare("UPDATE users SET pix_key = ?, pix_key_type = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+    .bind(pixKey, pixKeyType, user.id).run();
+  return json({ user: publicUser(await getUserById(env, user.id)) });
 }
 
 async function changePassword(request, env) {
@@ -576,7 +592,7 @@ async function confirmCash(request, env, rideId) {
   const ride = await env.DB.prepare("SELECT * FROM rides WHERE id = ? AND driver_id = ? AND payment_method = 'CASH' AND status = 'arrived'").bind(rideId, driver.id).first();
   if (!ride) return json({ error: "Pagamento em dinheiro não está aguardando confirmação." }, 409);
   const debt = ride.platform_share_cents + ride.fixed_fee_cents;
-  const result = await env.DB.prepare("UPDATE rides SET status = 'paid', payment_status = 'RECEIVED_IN_CASH', paid_at = CURRENT_TIMESTAMP, last_activity_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'arrived'").bind(rideId).run();
+  const result = await env.DB.prepare("UPDATE rides SET status = 'completed', payment_status = 'RECEIVED_IN_CASH', paid_at = CURRENT_TIMESTAMP, completed_at = CURRENT_TIMESTAMP, last_activity_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'arrived'").bind(rideId).run();
   if (result.meta?.changes) {
     await env.DB.prepare(`INSERT INTO ledger_entries (id, user_id, ride_id, kind, amount_cents, description)
       VALUES (?, ?, ?, 'cash_debt', ?, ?)`)
@@ -602,10 +618,8 @@ async function rateRide(request, env, rideId) {
   const stars = Number(body?.stars);
   const ride = await env.DB.prepare("SELECT * FROM rides WHERE id = ? AND passenger_id = ? AND status IN ('paid','completed')").bind(rideId, passenger.id).first();
   if (!ride || !ride.driver_id || !Number.isInteger(stars) || stars < 1 || stars > 5) return json({ error: "Avaliação inválida." }, 400);
-  await env.DB.batch([
-    env.DB.prepare("INSERT INTO ratings (id, ride_id, passenger_id, driver_id, stars) VALUES (?, ?, ?, ?, ?)").bind(crypto.randomUUID(), rideId, passenger.id, ride.driver_id, stars),
-    env.DB.prepare("UPDATE rides SET status = 'completed', completed_at = CURRENT_TIMESTAMP, last_activity_at = CURRENT_TIMESTAMP WHERE id = ?").bind(rideId)
-  ]);
+  await env.DB.prepare("INSERT OR IGNORE INTO ratings (id, ride_id, passenger_id, driver_id, stars) VALUES (?, ?, ?, ?, ?)")
+    .bind(crypto.randomUUID(), rideId, passenger.id, ride.driver_id, stars).run();
   return json({ completed: true });
 }
 
@@ -832,7 +846,7 @@ async function processAsaasEvent(env, event) {
 }
 
 async function markRidePaid(env, ride, paymentId, paymentStatus) {
-  const result = await env.DB.prepare(`UPDATE rides SET status = 'paid', payment_status = ?, paid_at = CURRENT_TIMESTAMP, last_activity_at = CURRENT_TIMESTAMP
+  const result = await env.DB.prepare(`UPDATE rides SET status = 'completed', payment_status = ?, paid_at = CURRENT_TIMESTAMP, completed_at = CURRENT_TIMESTAMP, last_activity_at = CURRENT_TIMESTAMP
     WHERE id = ? AND asaas_payment_id = ? AND status NOT IN ('paid','completed')`)
     .bind(paymentStatus, ride.id, paymentId).run();
   if (!result.meta?.changes) return;
