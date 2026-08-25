@@ -101,6 +101,18 @@ O sistema só considera o Pix pago quando recebe `PAYMENT_RECEIVED`.
 
 ## 7. Teste com passageiro e motorista
 
+Na Central de Operações do administrador, abra **Usuários de demonstração** e
+toque em **Criar ou redefinir contas**. O botão funciona somente no Sandbox e
+mostra os acessos que você pode enviar aos seus amigos:
+
+| Perfil | Telefone | Senha |
+|---|---|---|
+| Passageiro | `(92) 90000-0001` | `Aura@2026` |
+| Motorista (mototáxi) | `(92) 90000-0002` | `Aura@2026` |
+
+Cada vez que você tocar no botão, a senha volta para o valor acima e as sessões
+antigas dessas contas são encerradas.
+
 1. Crie uma conta e, no perfil, ative o modo motorista com CPF, veículo, fotos e chave Pix.
 2. A ativação é automática; permita a localização e toque em **Ficar disponível**.
 3. Confira no mapa administrativo se o motorista aparece online.

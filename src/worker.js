@@ -10,6 +10,31 @@ const VEHICLES = {
   motocarro: { name: "Motocarro", minimum: 10, extraKm: 2.5 },
   taxi: { name: "Carro", minimum: 12, extraKm: 3 }
 };
+const DEMO_PASSWORD = "Aura@2026";
+const DEMO_USERS = [
+  {
+    id: "aura-demo-passenger",
+    kind: "Passageiro",
+    name: "Amigo Passageiro",
+    phone: "92900000001",
+    cpf: "11144477735",
+    role: "passenger",
+    driverStatus: null,
+    vehicleType: null,
+    vehicleModel: null
+  },
+  {
+    id: "aura-demo-driver",
+    kind: "Motorista",
+    name: "Amigo Motorista",
+    phone: "92900000002",
+    cpf: "52998224725",
+    role: "driver",
+    driverStatus: "approved",
+    vehicleType: "mototaxi",
+    vehicleModel: "Honda Pop 110i • demonstração"
+  }
+];
 
 export default {
   async fetch(request, env, ctx) {
@@ -75,11 +100,14 @@ async function routeApi(request, env, ctx, url) {
   if (pathname === "/api/admin/drivers" && request.method === "GET") return adminDrivers(request, env);
   if (pathname === "/api/admin/operations" && request.method === "GET") return adminOperations(request, env);
   if (pathname === "/api/admin/password-resets" && request.method === "GET") return adminPasswordResets(request, env);
+  if (pathname === "/api/admin/demo-users" && request.method === "POST") return createDemoUsers(request, env);
   if (pathname === "/api/admin/payouts/preview" && request.method === "GET") return payoutPreview(request, env);
   if (pathname === "/webhooks/asaas" && request.method === "POST") return asaasWebhook(request, env, ctx);
 
   const rideAction = pathname.match(/^\/api\/rides\/([^/]+)\/(accept|start|arrive|cash-received|cancel|payment|rate)$/);
   if (rideAction) return handleRideAction(request, env, rideAction[1], rideAction[2]);
+  const rideDriver = pathname.match(/^\/api\/rides\/([^/]+)\/driver$/);
+  if (rideDriver && request.method === "GET") return rideDriverProfile(request, env, rideDriver[1]);
   const driverDecision = pathname.match(/^\/api\/admin\/drivers\/([^/]+)\/(approve|activate|reject|suspend)$/);
   if (driverDecision && request.method === "POST") return decideDriver(request, env, driverDecision[1], driverDecision[2]);
   const resetDecision = pathname.match(/^\/api\/admin\/password-resets\/([^/]+)\/(approve|reject)$/);
@@ -437,7 +465,8 @@ async function currentRide(request, env, url) {
   const mode = requestedMode === "driver" ? "driver" : requestedMode === "passenger" ? "passenger" : user.role === "driver" ? "driver" : "passenger";
   if (mode === "driver" && !isApprovedDriver(user)) return json({ error: "Ative seu perfil de motorista para continuar." }, 403);
   const field = mode === "driver" ? "driver_id" : "passenger_id";
-  const ride = await env.DB.prepare(`SELECT * FROM rides WHERE ${field} = ? AND status NOT IN ('completed','cancelled') ORDER BY created_at DESC LIMIT 1`).bind(user.id).first();
+  const current = await env.DB.prepare(`SELECT id FROM rides WHERE ${field} = ? AND status NOT IN ('completed','cancelled') ORDER BY created_at DESC LIMIT 1`).bind(user.id).first();
+  const ride = current ? await getRide(env, current.id) : null;
   return json({ ride: ride ? publicRide(ride) : null });
 }
 
@@ -530,6 +559,15 @@ async function paymentStatus(request, env, rideId) {
   }
   const qr = await env.DB.prepare("SELECT payload, encoded_image, expiration_date FROM payment_qr_codes WHERE ride_id = ?").bind(rideId).first();
   return json({ ride: publicRide(ride), payment: qr ? publicQr(qr) : null });
+}
+
+async function rideDriverProfile(request, env, rideId) {
+  const user = await requireUser(request, env);
+  if (user instanceof Response) return user;
+  const ride = await getRide(env, rideId);
+  if (!ride || !canAccessRide(user, ride)) return json({ error: "Corrida não encontrada." }, 404);
+  if (!ride.driver_id) return json({ driver: null });
+  return json({ driver: publicRideDriver(ride, true) });
 }
 
 async function confirmCash(request, env, rideId) {
@@ -626,6 +664,84 @@ async function adminOperations(request, env) {
     onlineDrivers: onlineDrivers.results || [],
     activeRides: activeRides.results || []
   });
+}
+
+async function createDemoUsers(request, env) {
+  const admin = await requireRole(request, env, "admin");
+  if (admin instanceof Response) return admin;
+  const environment = String(env.ASAAS_ENVIRONMENT || "sandbox").trim().toLowerCase();
+  if (environment !== "sandbox") {
+    return json({ error: "As contas de demonstração só podem ser criadas enquanto o Asaas estiver no Sandbox." }, 403);
+  }
+
+  const passenger = DEMO_USERS[0];
+  const driver = DEMO_USERS[1];
+  const occupied = await env.DB.prepare(`SELECT id, name, phone, cpf FROM users
+    WHERE id IN (?, ?) OR phone IN (?, ?) OR cpf IN (?, ?)`).bind(
+      passenger.id, driver.id,
+      passenger.phone, driver.phone,
+      passenger.cpf, driver.cpf
+    ).all();
+  const reservedPhones = new Map(DEMO_USERS.map(user => [user.phone, user.id]));
+  const reservedCpfs = new Map(DEMO_USERS.map(user => [user.cpf, user.id]));
+  const conflict = (occupied.results || []).find(row => {
+    if (!DEMO_USERS.some(user => user.id === row.id)) return true;
+    if (reservedPhones.has(row.phone) && reservedPhones.get(row.phone) !== row.id) return true;
+    return reservedCpfs.has(row.cpf) && reservedCpfs.get(row.cpf) !== row.id;
+  });
+  if (conflict) {
+    return json({ error: `O telefone ou CPF de demonstração já pertence a ${conflict.name || "outra conta"}.` }, 409);
+  }
+
+  const credentials = await Promise.all(DEMO_USERS.map(async user => ({
+    ...user,
+    password: await hashPassword(DEMO_PASSWORD)
+  })));
+  const statements = credentials.map(user => env.DB.prepare(`INSERT INTO users
+    (id, name, phone, cpf, password_hash, password_salt, role, status, driver_status,
+     vehicle_type, vehicle_model, pix_key, pix_key_type, profile_photo, vehicle_photo,
+     passenger_tutorial_seen, driver_tutorial_seen)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, NULL, NULL, NULL, NULL, 0, 0)
+    ON CONFLICT(id) DO UPDATE SET
+      name = excluded.name,
+      phone = excluded.phone,
+      cpf = excluded.cpf,
+      password_hash = excluded.password_hash,
+      password_salt = excluded.password_salt,
+      role = excluded.role,
+      status = 'active',
+      driver_status = excluded.driver_status,
+      vehicle_type = excluded.vehicle_type,
+      vehicle_model = excluded.vehicle_model,
+      pix_key = NULL,
+      pix_key_type = NULL,
+      profile_photo = NULL,
+      vehicle_photo = NULL,
+      passenger_tutorial_seen = 0,
+      driver_tutorial_seen = 0,
+      updated_at = CURRENT_TIMESTAMP`).bind(
+        user.id, user.name, user.phone, user.cpf,
+        user.password.hash, user.password.salt, user.role,
+        user.driverStatus, user.vehicleType, user.vehicleModel
+      ));
+  statements.push(
+    env.DB.prepare("DELETE FROM sessions WHERE user_id IN (?, ?)").bind(passenger.id, driver.id),
+    env.DB.prepare("UPDATE driver_locations SET is_online = 0, updated_at = CURRENT_TIMESTAMP WHERE driver_id = ?").bind(driver.id)
+  );
+  await env.DB.batch(statements);
+
+  return json({
+    created: true,
+    environment,
+    users: DEMO_USERS.map(user => ({
+      kind: user.kind,
+      name: user.name,
+      phone: user.phone,
+      cpf: user.cpf,
+      password: DEMO_PASSWORD,
+      vehicle: user.vehicleType ? VEHICLES[user.vehicleType]?.name : null
+    }))
+  }, 201);
 }
 
 async function decideDriver(request, env, driverId, action) {
@@ -860,7 +976,21 @@ async function requireDriverAccount(request, env) {
 }
 
 async function getUserById(env, id) { return env.DB.prepare("SELECT * FROM users WHERE id = ? LIMIT 1").bind(id).first(); }
-async function getRide(env, id) { return env.DB.prepare("SELECT * FROM rides WHERE id = ? LIMIT 1").bind(id).first(); }
+async function getRide(env, id) {
+  return env.DB.prepare(`SELECT r.*,
+    driver.name AS driver_name,
+    driver.profile_photo AS driver_profile_photo,
+    driver.vehicle_photo AS driver_vehicle_photo,
+    driver.vehicle_model AS driver_vehicle_model,
+    driver.vehicle_type AS driver_vehicle_type,
+    location.latitude AS driver_latitude,
+    location.longitude AS driver_longitude,
+    location.updated_at AS driver_location_updated_at
+    FROM rides r
+    LEFT JOIN users driver ON driver.id = r.driver_id
+    LEFT JOIN driver_locations location ON location.driver_id = r.driver_id
+    WHERE r.id = ? LIMIT 1`).bind(id).first();
+}
 
 function publicUser(user) {
   return {
@@ -902,7 +1032,31 @@ function publicRide(ride) {
     cancellationReason: ride.cancellation_reason || null,
     autoCancelled: Boolean(ride.auto_cancelled),
     lastActivityAt: ride.last_activity_at || ride.created_at,
-    createdAt: ride.created_at
+    createdAt: ride.created_at,
+    driver: publicRideDriver(ride)
+  };
+}
+
+function publicRideDriver(ride, includePhotos = false) {
+  if (!ride.driver_id) return null;
+  const hasLocation = ride.driver_latitude !== null && ride.driver_latitude !== undefined
+    && ride.driver_longitude !== null && ride.driver_longitude !== undefined;
+  const driverLatitude = Number(ride.driver_latitude);
+  const driverLongitude = Number(ride.driver_longitude);
+  return {
+    id: ride.driver_id,
+    name: ride.driver_name || "Motorista",
+    vehicleType: ride.driver_vehicle_type || ride.vehicle_type,
+    vehicleModel: ride.driver_vehicle_model || "Veículo não informado",
+    ...(includePhotos ? {
+      profilePhoto: ride.driver_profile_photo || null,
+      vehiclePhoto: ride.driver_vehicle_photo || null
+    } : {}),
+    location: hasLocation && Number.isFinite(driverLatitude) && Number.isFinite(driverLongitude) ? {
+      lat: driverLatitude,
+      lng: driverLongitude,
+      updatedAt: ride.driver_location_updated_at || null
+    } : null
   };
 }
 

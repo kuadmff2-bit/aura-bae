@@ -14,6 +14,7 @@ e Asaas para criar cobranças Pix dinâmicas.
 - Recuperação de senha assistida pelo administrador com link único de 15 minutos.
 - Central administrativa com mapa de satélite, motoristas online e rotas ativas.
 - Localização real dos motoristas online e prioridade por proximidade.
+- Acompanhamento do motorista no mapa, rota até o passageiro e fotos do cadastro.
 - Rotas viárias e cálculo de preço feito também no servidor.
 - Mototáxi, motocarro e carro.
 - Pagamento Pix criado somente quando o motorista confirma a chegada.
@@ -24,6 +25,7 @@ e Asaas para criar cobranças Pix dinâmicas.
 - Cancelamento automático de chamadas sem atualização por 5 minutos.
 - Livro-caixa interno para o saldo do motorista.
 - Rotina de repasse diário preparada, mas desligada por segurança até a homologação.
+- Duas contas de demonstração, criadas pelo administrador somente no Sandbox.
 
 ## Estrutura
 

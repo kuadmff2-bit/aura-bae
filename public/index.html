@@ -9,7 +9,7 @@
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="styles.css?v=2.0.0">
+  <link rel="stylesheet" href="styles.css?v=2.2.0">
 </head>
 <body>
   <section id="auth-page" class="auth-page">
@@ -64,7 +64,7 @@
           <div class="heading"><span>Passageiro</span><h1 id="passenger-greeting">Para onde você vai?</h1><p>Marque a saída e o destino diretamente no mapa de Barreirinha.</p></div>
           <article class="card vehicle-card"><div class="card-title"><div><small>Transporte</small><h2>Como você quer ir?</h2></div><b>Condutores disponíveis</b></div><div class="vehicle-grid" role="group" aria-label="Transporte"><button data-vehicle="mototaxi"><span>MT</span><div><strong>Mototáxi</strong><small>Individual • mínimo R$ 7</small></div><i>online</i></button><button class="active" data-vehicle="motocarro"><span>MC</span><div><strong>Motocarro</strong><small>Local • mínimo R$ 10</small></div><i>online</i></button><button data-vehicle="taxi"><span>CR</span><div><strong>Carro</strong><small>Confortável • mínimo R$ 12</small></div><i>online</i></button></div></article>
           <article class="card route-card"><div class="route-instruction"><small>Rota pelas ruas</small><strong id="route-instruction">1. Toque no local de saída</strong><span>Escolha os dois pontos somente tocando no mapa.</span></div><div class="map-toolbar"><button id="pick-origin" class="active"><i>A</i> Marcar saída</button><button id="pick-destination"><i>B</i> Marcar destino</button><button id="swap" disabled>⇅ Inverter</button><button id="clear-route" disabled>Limpar</button></div><div class="point-summary"><div><i>A</i><p><span>Saída</span><strong id="origin-label">Toque no mapa para marcar</strong></p></div><div><i>B</i><p><span>Destino</span><strong id="destination-label">Toque no mapa para marcar</strong></p></div></div><label class="payment-choice">Pagamento<select id="payment-method"><option value="PIX">Pix no destino</option><option value="CASH">Dinheiro no destino</option></select></label></article>
-          <div class="city-map-shell"><div id="city-map" class="city-map" aria-label="Mapa de Barreirinha"></div><span id="map-chip" class="map-chip">3 motocarros disponíveis</span><div id="map-message" class="map-message hidden"></div></div><div id="nearby-driver" class="nearby-driver"></div><div id="route-result" class="route-result hidden"></div><div id="status-panel" class="status-panel hidden" aria-live="polite"></div>
+          <div class="city-map-shell"><div id="city-map" class="city-map" aria-label="Mapa de Barreirinha"></div><span id="map-chip" class="map-chip">3 motocarros disponíveis</span><div id="map-message" class="map-message hidden"></div></div><div id="nearby-driver" class="nearby-driver"></div><div id="route-result" class="route-result hidden"></div><div id="status-panel" class="status-panel hidden" aria-live="polite"></div><article id="assigned-driver-card" class="card assigned-driver-card hidden" aria-live="polite"></article>
         </div><aside><article class="card summary"><div class="transport-title"><span id="transport-code">MC</span><div><small>Transporte escolhido</small><strong id="transport-name">Motocarro</strong></div></div><div class="price"><small>Valor estimado</small><strong id="fare">R$ 10,00</strong><span id="fare-description">Mínimo para motocarro</span></div><div class="lines"><div><span>Corrida</span><b id="fare-line">R$ 10,00</b></div><div><span>Taxa da plataforma</span><b>R$ 1,50</b></div><div class="total"><span>Total no destino</span><b id="total">R$ 11,50</b></div></div><div id="payment-panel"></div><button id="action-button" class="primary" disabled>Marque a rota no mapa</button><button id="cancel-button" class="secondary hidden">Cancelar busca</button><p class="safe">Pagamento solicitado somente ao chegar no destino.</p></article><article class="card split"><small>Divisão da corrida</small><div><span>Motorista (90%)</span><b id="driver-share">R$ 9,00</b></div><div><span>Aura Bae (10%)</span><b id="platform-share">R$ 1,00</b></div><div><span>Taxa fixa</span><b>R$ 1,50</b></div></article></aside></div>
       </section>
       <section id="driver" class="view"><div class="workspace"><div class="main-column"><div class="heading driver-heading"><div><span>Motorista</span><h1 id="driver-greeting">Olá</h1><p id="driver-description">Receba somente chamadas da sua categoria.</p></div><button id="online-toggle" class="online"><i></i> Ficar disponível</button></div><div class="stats"><article><small>Hoje</small><strong>0 corridas</strong><span>Nenhuma corrida realizada</span></article><article><small>Ganhos líquidos</small><strong>R$ 0,00</strong><span>Sem ganhos registrados</span></article><article><small>Avaliação</small><strong>—</strong><span>Sem avaliações</span></article></div><article id="driver-panel" class="empty"></article></div><aside><article class="card summary"><small class="green-label">Cadastro</small><h2 id="driver-category-name">Motocarro</h2><p id="driver-vehicle-id" class="muted"></p><div class="lines"><div><span>Comissão</span><b>10%</b></div><div><span>Taxa fixa do passageiro</span><b>R$ 1,50</b></div></div></article></aside></div></section>
@@ -97,6 +97,7 @@
             <article class="card"><div class="card-title"><div><small>Equipe</small><h2>Motoristas cadastrados</h2></div><b id="pending-count">0 ativos</b></div><div id="pending-drivers" class="driver-list"></div></article>
             <article class="card"><div class="card-title"><div><small>Preços</small><h2>Valores mínimos</h2></div></div><div class="fare-list"><div><span>Mototáxi</span><b>R$ 7,00</b></div><div><span>Motocarro</span><b>R$ 10,00</b></div><div><span>Carro</span><b>R$ 12,00</b></div></div></article>
             <article class="card"><div class="card-title"><div><small>Segurança</small><h2>Recuperações de senha</h2></div><b id="recovery-count">0 pedidos</b></div><div id="password-reset-list" class="driver-list"></div></article>
+            <article class="card demo-users-card"><div class="card-title"><div><small>Sandbox</small><h2>Usuários de demonstração</h2></div><b>Amigos</b></div><p class="muted">Crie duas contas prontas para seus amigos testarem o aplicativo em aparelhos diferentes.</p><button id="create-demo-users" class="primary" type="button">Criar ou redefinir contas</button><div id="demo-users-result" class="demo-users-result hidden" aria-live="polite"></div></article>
           </div>
         </div>
       </section>
@@ -105,8 +106,17 @@
     </main>
     <footer><span class="logo small">A</span><p><strong>Aura Bae</strong> • Mobilidade local em Barreirinha-AM</p><small>Atendimento e suporte: (97) 99137-6123.</small></footer>
   </div>
+  <div id="photo-crop-modal" class="photo-crop-modal hidden" role="dialog" aria-modal="true" aria-labelledby="photo-crop-title">
+    <article class="photo-crop-dialog">
+      <header><div><small>Ajustar imagem</small><h2 id="photo-crop-title">Recortar foto</h2></div><button id="photo-crop-close" type="button" aria-label="Fechar recorte">×</button></header>
+      <div id="photo-crop-stage" class="photo-crop-stage portrait"><img id="photo-crop-image" alt="Foto sendo recortada" draggable="false"></div>
+      <p id="photo-crop-hint">Arraste a foto para posicionar o rosto dentro do quadro.</p>
+      <label class="photo-zoom"><span>Menor</span><input id="photo-crop-zoom" type="range" min="1" max="3" value="1" step="0.01" aria-label="Ampliar foto"><span>Maior</span></label>
+      <div class="photo-crop-actions"><button id="photo-crop-cancel" class="secondary" type="button">Cancelar</button><button id="photo-crop-confirm" class="primary" type="button">Usar esta foto</button></div>
+    </article>
+  </div>
   <div id="tutorial-modal" class="tutorial-modal hidden" role="dialog" aria-modal="true" aria-labelledby="tutorial-title"><article><span id="tutorial-step-label" class="green-label">Passo 1 de 4</span><div id="tutorial-icon" class="tutorial-icon">A</div><h2 id="tutorial-title">Bem-vindo</h2><p id="tutorial-text"></p><div id="tutorial-dots" class="tutorial-dots"></div><div class="tutorial-buttons"><button id="tutorial-skip" class="text-button">Pular</button><button id="tutorial-next" class="primary">Continuar</button></div></article></div>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="app.js?v=2.0.0"></script>
+  <script src="app.js?v=2.2.0"></script>
 </body>
 </html>

@@ -37,6 +37,13 @@ let routeDistance = null;
 let routeDuration = null;
 let routeController = null;
 let driverMarkers = [];
+let assignedDriverMarker = null;
+let driverApproachLine = null;
+let driverTrackingController = null;
+let driverTrackingKey = "";
+let driverLocationRefreshRunning = false;
+const driverProfileCache = new Map();
+const driverProfileRequests = new Set();
 let assignedDriver = "";
 let activeRide = null;
 let ridePoller = null;
@@ -88,6 +95,212 @@ async function imageData(file) {
   if (data.length > 520000) throw new Error("A foto ficou muito grande. Escolha uma imagem mais leve.");
   return data;
 }
+
+const croppedPhotoData = new Map();
+let photoCropState = null;
+
+function photoKind(input) {
+  return input.id.includes("vehicle") ? "vehicle" : "portrait";
+}
+
+function photoPickerText(input) {
+  if (input.id.includes("vehicle")) return { title: "Foto do veículo", action: "Adicionar veículo" };
+  if (input.id === "profile-photo") return { title: "Foto do perfil", action: "Adicionar foto" };
+  return { title: "Sua foto", action: "Adicionar foto" };
+}
+
+function updatePhotoPicker(input, data, readyText = "Foto pronta para salvar") {
+  const control = input.closest("label")?.querySelector(".photo-picker-control");
+  if (!control) return;
+  const thumb = control.querySelector(".photo-picker-thumb");
+  const status = control.querySelector(".photo-picker-status");
+  const action = control.querySelector(".photo-picker-action");
+  if (data) {
+    thumb.src = data;
+    thumb.classList.remove("hidden");
+    control.querySelector(".photo-picker-icon").classList.add("hidden");
+    status.textContent = readyText;
+    action.textContent = "Trocar";
+    control.classList.add("has-photo");
+  } else {
+    thumb.removeAttribute("src");
+    thumb.classList.add("hidden");
+    control.querySelector(".photo-picker-icon").classList.remove("hidden");
+    status.textContent = "Toque para escolher e recortar";
+    action.textContent = "Escolher";
+    control.classList.remove("has-photo");
+  }
+}
+
+function enhancePhotoInputs() {
+  $$('input[type="file"][accept*="image"]').forEach(input => {
+    if (input.dataset.photoEnhanced) return;
+    input.dataset.photoEnhanced = "true";
+    input.classList.add("photo-input");
+    const label = input.closest("label");
+    if (!label) return;
+    const copy = photoPickerText(input);
+    [...label.childNodes].filter(node => node.nodeType === Node.TEXT_NODE && node.textContent.trim()).forEach(node => node.remove());
+    label.classList.add("photo-picker");
+    const title = document.createElement("span");
+    title.className = "photo-picker-title";
+    title.textContent = copy.title;
+    label.insertBefore(title, input);
+    const control = document.createElement("span");
+    control.className = "photo-picker-control";
+    control.setAttribute("role", "button");
+    control.setAttribute("tabindex", "0");
+    control.innerHTML = `<span class="photo-picker-media"><span class="photo-picker-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8.3 5.2 9.4 3.5h5.2l1.1 1.7H19a3 3 0 0 1 3 3v8.8a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3V8.2a3 3 0 0 1 3-3h3.3Zm3.7 3a4.4 4.4 0 1 0 0 8.8 4.4 4.4 0 0 0 0-8.8Zm0 2a2.4 2.4 0 1 1 0 4.8 2.4 2.4 0 0 1 0-4.8Z"/></svg></span><img class="photo-picker-thumb hidden" alt="Prévia da foto"></span><span class="photo-picker-copy"><strong>${copy.action}</strong><small class="photo-picker-status">Toque para escolher e recortar</small></span><span class="photo-picker-action">Escolher</span>`;
+    label.appendChild(control);
+    control.addEventListener("keydown", event => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        input.click();
+      }
+    });
+    input.addEventListener("change", () => {
+      const file = input.files?.[0];
+      if (file) openPhotoCropper(input, file);
+    });
+  });
+}
+
+function cropBox() {
+  return $("#photo-crop-stage").getBoundingClientRect();
+}
+
+function renderPhotoCrop() {
+  if (!photoCropState) return;
+  const box = cropBox();
+  if (!box.width || !box.height) return;
+  const { image } = photoCropState;
+  photoCropState.baseScale = Math.max(box.width / image.naturalWidth, box.height / image.naturalHeight);
+  const scale = photoCropState.baseScale * photoCropState.zoom;
+  const width = image.naturalWidth * scale;
+  const height = image.naturalHeight * scale;
+  const maxX = Math.max(0, (width - box.width) / 2);
+  const maxY = Math.max(0, (height - box.height) / 2);
+  photoCropState.offsetX = Math.max(-maxX, Math.min(maxX, photoCropState.offsetX));
+  photoCropState.offsetY = Math.max(-maxY, Math.min(maxY, photoCropState.offsetY));
+  photoCropState.rendered = {
+    scale,
+    left: box.width / 2 - width / 2 + photoCropState.offsetX,
+    top: box.height / 2 - height / 2 + photoCropState.offsetY,
+    width,
+    height,
+    boxWidth: box.width,
+    boxHeight: box.height
+  };
+  const cropImage = $("#photo-crop-image");
+  cropImage.style.width = `${width}px`;
+  cropImage.style.height = `${height}px`;
+  cropImage.style.left = `${photoCropState.rendered.left}px`;
+  cropImage.style.top = `${photoCropState.rendered.top}px`;
+}
+
+function closePhotoCropper(cancelled = true) {
+  if (!photoCropState) return;
+  if (cancelled) photoCropState.input.value = "";
+  URL.revokeObjectURL(photoCropState.url);
+  photoCropState = null;
+  $("#photo-crop-modal").classList.add("hidden");
+  document.body.classList.remove("photo-crop-open");
+}
+
+function openPhotoCropper(input, file) {
+  if (!/^image\/(jpeg|png|webp)$/.test(file.type)) {
+    input.value = "";
+    alert("Escolha uma foto JPG, PNG ou WebP.");
+    return;
+  }
+  const url = URL.createObjectURL(file);
+  const image = new Image();
+  image.onload = () => {
+    const kind = photoKind(input);
+    photoCropState = { input, image, url, kind, zoom: 1, offsetX: 0, offsetY: 0, dragging: null };
+    const stage = $("#photo-crop-stage");
+    stage.classList.toggle("vehicle", kind === "vehicle");
+    stage.classList.toggle("portrait", kind !== "vehicle");
+    $("#photo-crop-title").textContent = kind === "vehicle" ? "Recortar foto do veículo" : "Recortar sua foto";
+    $("#photo-crop-hint").textContent = kind === "vehicle" ? "Arraste para deixar o veículo bem enquadrado." : "Arraste para posicionar o rosto dentro do quadro.";
+    $("#photo-crop-zoom").value = "1";
+    $("#photo-crop-image").src = url;
+    $("#photo-crop-modal").classList.remove("hidden");
+    document.body.classList.add("photo-crop-open");
+    requestAnimationFrame(() => requestAnimationFrame(renderPhotoCrop));
+  };
+  image.onerror = () => {
+    URL.revokeObjectURL(url);
+    input.value = "";
+    alert("Não foi possível abrir essa foto. Escolha outra imagem.");
+  };
+  image.src = url;
+}
+
+function confirmPhotoCrop() {
+  if (!photoCropState?.rendered) return;
+  const { image, input, kind, rendered } = photoCropState;
+  const outputWidth = kind === "vehicle" ? 960 : 720;
+  const outputHeight = kind === "vehicle" ? 600 : 720;
+  const canvas = document.createElement("canvas");
+  canvas.width = outputWidth;
+  canvas.height = outputHeight;
+  const sourceX = Math.max(0, -rendered.left / rendered.scale);
+  const sourceY = Math.max(0, -rendered.top / rendered.scale);
+  const sourceWidth = Math.min(image.naturalWidth - sourceX, rendered.boxWidth / rendered.scale);
+  const sourceHeight = Math.min(image.naturalHeight - sourceY, rendered.boxHeight / rendered.scale);
+  canvas.getContext("2d").drawImage(image, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, outputWidth, outputHeight);
+  let data = "";
+  for (const quality of [.84, .74, .64, .54, .44]) {
+    data = canvas.toDataURL("image/jpeg", quality);
+    if (data.length <= 520000) break;
+  }
+  if (data.length > 520000) {
+    alert("A foto ficou muito grande. Tente aproximar menos ou escolha outra imagem.");
+    return;
+  }
+  croppedPhotoData.set(input.id, data);
+  updatePhotoPicker(input, data);
+  if (input.id === "profile-photo") {
+    $("#profile-photo-preview").src = data;
+    $("#profile-photo-preview").classList.remove("hidden");
+  }
+  input.value = "";
+  closePhotoCropper(false);
+}
+
+async function selectedPhotoData(id) {
+  if (croppedPhotoData.has(id)) return croppedPhotoData.get(id);
+  return imageData(document.getElementById(id)?.files?.[0]);
+}
+
+enhancePhotoInputs();
+
+const photoCropStage = $("#photo-crop-stage");
+photoCropStage.addEventListener("pointerdown", event => {
+  if (!photoCropState) return;
+  photoCropStage.setPointerCapture(event.pointerId);
+  photoCropState.dragging = { x: event.clientX, y: event.clientY, offsetX: photoCropState.offsetX, offsetY: photoCropState.offsetY };
+});
+photoCropStage.addEventListener("pointermove", event => {
+  if (!photoCropState?.dragging) return;
+  photoCropState.offsetX = photoCropState.dragging.offsetX + event.clientX - photoCropState.dragging.x;
+  photoCropState.offsetY = photoCropState.dragging.offsetY + event.clientY - photoCropState.dragging.y;
+  renderPhotoCrop();
+});
+photoCropStage.addEventListener("pointerup", () => { if (photoCropState) photoCropState.dragging = null; });
+photoCropStage.addEventListener("pointercancel", () => { if (photoCropState) photoCropState.dragging = null; });
+$("#photo-crop-zoom").addEventListener("input", event => {
+  if (!photoCropState) return;
+  photoCropState.zoom = Number(event.target.value);
+  renderPhotoCrop();
+});
+$("#photo-crop-confirm").onclick = confirmPhotoCrop;
+$("#photo-crop-cancel").onclick = () => closePhotoCropper(true);
+$("#photo-crop-close").onclick = () => closePhotoCropper(true);
+$("#photo-crop-modal").addEventListener("click", event => { if (event.target.id === "photo-crop-modal") closePhotoCropper(true); });
+window.addEventListener("resize", () => { if (photoCropState) renderPhotoCrop(); });
+window.addEventListener("keydown", event => { if (event.key === "Escape" && photoCropState) closePhotoCropper(true); });
 
 function distanceBetween(a, b) {
   const toRadians = value => value * Math.PI / 180;
@@ -168,8 +381,8 @@ $("#auth-form").addEventListener("submit", async event => {
   $("#auth-submit").disabled = true;
   const name = $("#auth-name").value.trim();
   try {
-    const profilePhoto = authMode === "register" && registerRole === "driver" ? await imageData($("#auth-profile-photo").files[0]) : undefined;
-    const vehiclePhoto = authMode === "register" && registerRole === "driver" ? await imageData($("#auth-vehicle-photo").files[0]) : undefined;
+    const profilePhoto = authMode === "register" && registerRole === "driver" ? await selectedPhotoData("auth-profile-photo") : undefined;
+    const vehiclePhoto = authMode === "register" && registerRole === "driver" ? await selectedPhotoData("auth-vehicle-photo") : undefined;
     const result = authMode === "login"
       ? await api("/api/auth/login", { method: "POST", body: { phone, password } })
       : await api("/api/auth/register", {
@@ -341,6 +554,112 @@ function driverMarkerIcon(driver) {
   return L.divIcon({ className: "driver-marker-wrap", html: `<span class="driver-map-marker"><b>${vehicles[selectedVehicle].code}</b><small>${firstName}</small></span>`, iconSize: [116,42], iconAnchor: [58,21] });
 }
 
+function assignedDriverIcon(driver) {
+  driver = { ...driver, ...(driverProfileCache.get(driver.id) || {}) };
+  const info = vehicles[driver.vehicleType] || vehicles[selectedVehicle];
+  const portrait = driver.profilePhoto
+    ? `<img src="${escapeHtml(driver.profilePhoto)}" alt="">`
+    : `<b>${escapeHtml(initials(driver.name))}</b>`;
+  return L.divIcon({
+    className: "assigned-driver-wrap",
+    html: `<span class="assigned-driver-marker"><i>${portrait}</i><small>${escapeHtml(driver.name.split(" ")[0])}</small><em>A caminho</em></span>`,
+    iconSize: [126, 48],
+    iconAnchor: [63, 24]
+  });
+}
+
+function clearDriverTracking() {
+  driverTrackingController?.abort();
+  driverTrackingController = null;
+  driverTrackingKey = "";
+  assignedDriverMarker?.remove();
+  driverApproachLine?.remove();
+  assignedDriverMarker = driverApproachLine = null;
+}
+
+function renderAssignedDriver(driver, status) {
+  const card = $("#assigned-driver-card");
+  if (!driver) {
+    card.classList.add("hidden");
+    card.innerHTML = "";
+    return;
+  }
+  driver = { ...driver, ...(driverProfileCache.get(driver.id) || {}) };
+  ensureAssignedDriverProfile(activeRide);
+  const info = vehicles[driver.vehicleType] || vehicles[selectedVehicle];
+  const driverPhoto = driver.profilePhoto
+    ? `<img src="${escapeHtml(driver.profilePhoto)}" alt="Foto de ${escapeHtml(driver.name)}">`
+    : `<span>${escapeHtml(initials(driver.name))}</span>`;
+  const vehiclePhoto = driver.vehiclePhoto
+    ? `<img src="${escapeHtml(driver.vehiclePhoto)}" alt="Foto do veículo de ${escapeHtml(driver.name)}">`
+    : `<span>${escapeHtml(info.code)}</span>`;
+  const statusText = status === "accepted" ? "Está indo buscar você" : status === "in_progress" ? "Corrida em andamento" : "Chegada confirmada";
+  card.innerHTML = `<div class="assigned-driver-heading"><div><small>Seu motorista</small><h2>${escapeHtml(driver.name)}</h2><p>${escapeHtml(statusText)}</p></div><b>${escapeHtml(info.name)}</b></div><div class="assigned-photo-grid"><figure><div>${driverPhoto}</div><figcaption><strong>Motorista</strong><span>${escapeHtml(driver.name)}</span></figcaption></figure><figure><div>${vehiclePhoto}</div><figcaption><strong>Veículo</strong><span>${escapeHtml(driver.vehicleModel)}</span></figcaption></figure></div>`;
+  card.classList.remove("hidden");
+}
+
+async function ensureAssignedDriverProfile(ride) {
+  const id = ride?.driver?.id;
+  if (!id || driverProfileCache.has(id) || driverProfileRequests.has(id)) return;
+  driverProfileRequests.add(id);
+  try {
+    const result = await api(`/api/rides/${encodeURIComponent(ride.id)}/driver`);
+    if (!result.driver) return;
+    driverProfileCache.set(id, result.driver);
+    if (activeRide?.id === ride.id && activeRide.driver?.id === id) {
+      activeRide.driver = { ...activeRide.driver, ...result.driver };
+      renderAssignedDriver(activeRide.driver, activeRide.status);
+      if (assignedDriverMarker) assignedDriverMarker.setIcon(assignedDriverIcon(activeRide.driver));
+    }
+  } catch {} finally {
+    driverProfileRequests.delete(id);
+  }
+}
+
+async function updateDriverTracking(ride) {
+  if (!cityMap || !ride?.driver?.location || !["accepted", "in_progress"].includes(ride.status)) {
+    if (ride?.driver?.location && assignedDriverMarker) assignedDriverMarker.setLatLng(ride.driver.location);
+    if (!["accepted", "in_progress"].includes(ride?.status)) {
+      driverApproachLine?.remove();
+      driverApproachLine = null;
+    }
+    return;
+  }
+  const driver = { ...ride.driver, ...(driverProfileCache.get(ride.driver.id) || {}) };
+  const location = driver.location;
+  const target = ride.status === "accepted" ? ride.origin : ride.destination;
+  driverMarkers.forEach(marker => marker.remove());
+  driverMarkers = [];
+  if (!assignedDriverMarker) assignedDriverMarker = L.marker([location.lat, location.lng], { icon: assignedDriverIcon(driver), zIndexOffset: 450 }).addTo(cityMap);
+  else assignedDriverMarker.setLatLng([location.lat, location.lng]);
+  const key = `${ride.status}:${location.lat.toFixed(5)}:${location.lng.toFixed(5)}:${target.lat.toFixed(5)}:${target.lng.toFixed(5)}`;
+  if (key === driverTrackingKey) return;
+  driverTrackingKey = key;
+  driverTrackingController?.abort();
+  driverTrackingController = new AbortController();
+  const url = `https://router.project-osrm.org/route/v1/driving/${location.lng},${location.lat};${target.lng},${target.lat}?overview=full&geometries=geojson`;
+  try {
+    const response = await fetch(url, { signal: driverTrackingController.signal });
+    const data = await response.json();
+    const route = data.routes?.[0];
+    if (!response.ok || !route) throw new Error("route");
+    const coordinates = route.geometry.coordinates.map(([lng, lat]) => [lat, lng]);
+    driverApproachLine?.remove();
+    driverApproachLine = L.featureGroup([
+      L.polyline(coordinates, { color: "#ffffff", weight: 11, opacity: .9 }),
+      L.polyline(coordinates, { color: "#28c890", weight: 6, opacity: 1 })
+    ]).addTo(cityMap);
+    const eta = Math.max(1, Math.round(route.duration / 60));
+    const distance = route.distance / 1000;
+    $("#map-chip").textContent = ride.status === "accepted" ? `${driver.name.split(" ")[0]} chega em ${eta} min` : `${eta} min até o destino`;
+    $("#map-message").textContent = `${distance.toFixed(1).replace(".", ",")} km pelas ruas • localização atualizada`;
+    $("#map-message").classList.remove("hidden");
+    cityMap.fitBounds(driverApproachLine.getBounds(), { padding: [52, 52], maxZoom: 17 });
+  } catch (error) {
+    if (error.name !== "AbortError") $("#map-chip").textContent = `${driver.name.split(" ")[0]} está a caminho`;
+  }
+}
+
 function renderProximity() {
   const info = vehicles[selectedVehicle], list = driversByProximity(), closest = list[0], panel = $("#nearby-driver");
   $("#map-chip").textContent = `${list.length} ${info.name.toLowerCase()} disponíveis`;
@@ -445,6 +764,10 @@ function setStatus(label, title, text) {
 
 function resetPassenger() {
   clearTimeout(passengerTimer); passengerStep = "idle"; assignedDriver = "";
+  clearDriverTracking();
+  $("#passenger").classList.remove("ride-active");
+  $("#assigned-driver-card").classList.add("hidden");
+  $("#assigned-driver-card").innerHTML = "";
   $("#status-panel").classList.add("hidden"); $("#cancel-button").classList.add("hidden"); $("#payment-panel").innerHTML = "";
   const ready = Number.isFinite(Number(routeDistance)) && Number(routeDistance) > 0 && Number.isFinite(fareValue()), info = vehicles[selectedVehicle];
   $("#action-button").classList.remove("hidden"); $("#action-button").disabled = !ready;
@@ -516,6 +839,7 @@ function applyServerPrice(ride) {
 
 function renderPassengerRide(ride, payment = null) {
   setRideControlsLocked(true);
+  $("#passenger").classList.add("ride-active");
   applyServerPrice(ride);
   $("#action-button").disabled = true;
   $("#action-button").classList.remove("hidden");
@@ -542,7 +866,9 @@ function renderPassengerRide(ride, payment = null) {
   } else if (ride.status === "paid") {
     clearInterval(ridePoller);
     showRating();
-  } else if (["cancelled", "completed"].includes(ride.status)) handleExpiredPassengerRide(ride);
+  } else if (["cancelled", "completed"].includes(ride.status)) return handleExpiredPassengerRide(ride);
+  renderAssignedDriver(ride.driver, ride.status);
+  updateDriverTracking(ride);
 }
 
 function handleExpiredPassengerRide(ride = null) {
@@ -647,7 +973,8 @@ async function resumeDriverRide() {
 function startDriverPolling() {
   clearInterval(driverPoller);
   clearInterval(locationPoller);
-  locationPoller = setInterval(() => refreshDriverLocation(), 45000);
+  refreshDriverLocation();
+  locationPoller = setInterval(() => refreshDriverLocation(), 10000);
   driverPoller = setInterval(async () => {
     if (!driverOnline) return;
     try {
@@ -661,11 +988,12 @@ function startDriverPolling() {
 }
 
 async function refreshDriverLocation() {
-  if (!driverOnline) return;
+  if (!driverOnline || driverLocationRefreshRunning) return;
+  driverLocationRefreshRunning = true;
   try {
-    const coords = await new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(position => resolve(position.coords), reject, { enableHighAccuracy: true, timeout: 12000 }));
+    const coords = await new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(position => resolve(position.coords), reject, { enableHighAccuracy: true, timeout: 12000, maximumAge: 5000 }));
     await api("/api/driver/status", { method: "POST", body: { online: true, latitude: coords.latitude, longitude: coords.longitude } });
-  } catch {}
+  } catch {} finally { driverLocationRefreshRunning = false; }
 }
 
 function renderDriverRide(ride) {
@@ -851,6 +1179,41 @@ async function decidePasswordReset(id, action) {
   } catch (error) { whatsappWindow?.close(); alert(error.message); }
 }
 
+async function createDemoUsers() {
+  const button = $("#create-demo-users");
+  const output = $("#demo-users-result");
+  button.disabled = true;
+  button.textContent = "Criando contas…";
+  output.classList.add("hidden");
+  try {
+    const result = await api("/api/admin/demo-users", { method: "POST" });
+    output.innerHTML = `<p class="demo-success">Contas prontas. Envie estes dados aos seus amigos:</p>${result.users.map(user => `
+      <article class="demo-credential">
+        <div><small>${escapeHtml(user.kind)}</small><strong>${escapeHtml(user.name)}</strong>${user.vehicle ? `<span>${escapeHtml(user.vehicle)}</span>` : ""}</div>
+        <dl><div><dt>Telefone</dt><dd>${escapeHtml(phoneText(user.phone))}</dd></div><div><dt>Senha</dt><dd>${escapeHtml(user.password)}</dd></div></dl>
+        <button class="secondary" type="button" data-copy-demo="${escapeHtml(`${user.kind}: telefone ${phoneText(user.phone)}, senha ${user.password}`)}">Copiar acesso</button>
+      </article>`).join("")}`;
+    output.classList.remove("hidden");
+    $$('[data-copy-demo]').forEach(copyButton => copyButton.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(copyButton.dataset.copyDemo);
+        const previous = copyButton.textContent;
+        copyButton.textContent = "Copiado";
+        setTimeout(() => { copyButton.textContent = previous; }, 1400);
+      } catch { alert(copyButton.dataset.copyDemo); }
+    });
+    renderAdmin();
+  } catch (error) {
+    output.innerHTML = `<p class="form-error">${escapeHtml(error.message)}</p>`;
+    output.classList.remove("hidden");
+  } finally {
+    button.disabled = false;
+    button.textContent = "Criar ou redefinir contas";
+  }
+}
+
+$("#create-demo-users").onclick = createDemoUsers;
+
 function renderProfile() {
   if (!currentUser) return;
   $("#profile-display-name").textContent = currentUser.name;
@@ -859,6 +1222,7 @@ function renderProfile() {
   $("#profile-avatar").innerHTML = currentUser.profilePhoto ? `<img src="${currentUser.profilePhoto}" alt="Sua foto">` : escapeHtml(initials(currentUser.name));
   $("#profile-photo-preview").classList.toggle("hidden", !currentUser.profilePhoto);
   if (currentUser.profilePhoto) $("#profile-photo-preview").src = currentUser.profilePhoto;
+  if (!croppedPhotoData.has("profile-photo")) updatePhotoPicker($("#profile-photo"), currentUser.profilePhoto, "Foto atual");
   const driverForm = $("#driver-application-form");
   driverForm.closest("article").classList.toggle("hidden", currentUser.role === "admin");
   $("#replay-passenger-tutorial").classList.toggle("hidden", currentUser.role === "admin");
@@ -874,23 +1238,18 @@ function renderProfile() {
   if (currentUser.profilePhoto) previews.push(`<figure><img src="${currentUser.profilePhoto}" alt="Foto do motorista"><figcaption>Motorista</figcaption></figure>`);
   if (currentUser.vehiclePhoto) previews.push(`<figure><img src="${currentUser.vehiclePhoto}" alt="Foto do veículo"><figcaption>Veículo</figcaption></figure>`);
   $("#driver-photo-previews").innerHTML = previews.join("");
+  if (!croppedPhotoData.has("driver-profile-photo")) updatePhotoPicker($("#driver-profile-photo"), currentUser.profilePhoto, "Foto atual");
+  if (!croppedPhotoData.has("driver-vehicle-photo")) updatePhotoPicker($("#driver-vehicle-photo"), currentUser.vehiclePhoto, "Foto atual");
 }
-
-$("#profile-photo").onchange = async event => {
-  try {
-    const data = await imageData(event.target.files[0]);
-    $("#profile-photo-preview").src = data;
-    $("#profile-photo-preview").classList.remove("hidden");
-  } catch (error) { setMessage($("#profile-error"), error.message); }
-};
 
 $("#profile-form").onsubmit = async event => {
   event.preventDefault();
   const output = $("#profile-error"); output.classList.add("hidden");
   try {
-    const result = await api("/api/profile", { method: "PATCH", body: { name: $("#profile-name").value, profilePhoto: await imageData($("#profile-photo").files[0]) } });
+    const result = await api("/api/profile", { method: "PATCH", body: { name: $("#profile-name").value, profilePhoto: await selectedPhotoData("profile-photo") } });
     currentUser = result.user;
     currentUser.vehicle = currentUser.vehicleType; currentUser.vehicleId = currentUser.vehicleModel;
+    croppedPhotoData.delete("profile-photo");
     $("#user-badge").textContent = initials(currentUser.name);
     renderProfile();
     setMessage(output, "Perfil atualizado.", true);
@@ -907,11 +1266,13 @@ $("#driver-application-form").onsubmit = async event => {
       vehicleModel: $("#driver-profile-model").value,
       pixKeyType: $("#driver-profile-pix-type").value,
       pixKey: $("#driver-profile-pix-key").value,
-      profilePhoto: await imageData($("#driver-profile-photo").files[0]),
-      vehiclePhoto: await imageData($("#driver-vehicle-photo").files[0])
+      profilePhoto: await selectedPhotoData("driver-profile-photo"),
+      vehiclePhoto: await selectedPhotoData("driver-vehicle-photo")
     } });
     currentUser = result.user;
     currentUser.vehicle = currentUser.vehicleType; currentUser.vehicleId = currentUser.vehicleModel;
+    croppedPhotoData.delete("driver-profile-photo");
+    croppedPhotoData.delete("driver-vehicle-photo");
     renderNav(); renderProfile(); renderDriverProfile();
     setMessage(output, "Perfil de motorista ativo. Você já pode ficar disponível.", true);
     showTutorial("driver");
