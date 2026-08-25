@@ -1,6 +1,6 @@
 const SESSION_COOKIE = "aura_session";
 const SESSION_SECONDS = 60 * 60 * 24 * 30;
-const PASSWORD_ITERATIONS = 120000;
+const PASSWORD_ITERATIONS = 100000;
 const VEHICLES = {
   mototaxi: { name: "Mototáxi", minimum: 7, extraKm: 2 },
   motocarro: { name: "Motocarro", minimum: 10, extraKm: 2.5 },
