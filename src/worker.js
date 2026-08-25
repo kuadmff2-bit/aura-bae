@@ -1,5 +1,6 @@
 const SESSION_COOKIE = "aura_session";
 const SESSION_SECONDS = 60 * 60 * 24 * 30;
+// Cloudflare Workers currently rejects PBKDF2 iteration counts above 100,000.
 const PASSWORD_ITERATIONS = 100000;
 const VEHICLES = {
   mototaxi: { name: "Mototáxi", minimum: 7, extraKm: 2 },
@@ -61,6 +62,7 @@ async function routeApi(request, env, ctx, url) {
   if (pathname === "/api/rides/available" && request.method === "GET") return availableRides(request, env);
   if (pathname === "/api/admin/summary" && request.method === "GET") return adminSummary(request, env);
   if (pathname === "/api/admin/drivers" && request.method === "GET") return adminDrivers(request, env);
+  if (pathname === "/api/admin/operations" && request.method === "GET") return adminOperations(request, env);
   if (pathname === "/api/admin/payouts/preview" && request.method === "GET") return payoutPreview(request, env);
   if (pathname === "/webhooks/asaas" && request.method === "POST") return asaasWebhook(request, env, ctx);
 
@@ -379,6 +381,35 @@ async function adminDrivers(request, env) {
   const rows = await env.DB.prepare(`SELECT id, name, phone, cpf, status, vehicle_type, vehicle_model, pix_key_type, created_at
     FROM users WHERE role = 'driver' ORDER BY created_at DESC`).all();
   return json({ drivers: rows.results || [] });
+}
+
+async function adminOperations(request, env) {
+  const admin = await requireRole(request, env, "admin");
+  if (admin instanceof Response) return admin;
+  const [onlineDrivers, activeRides] = await env.DB.batch([
+    env.DB.prepare(`SELECT u.id, u.name, u.phone, u.vehicle_type, u.vehicle_model,
+      dl.latitude, dl.longitude, dl.updated_at
+      FROM driver_locations dl
+      JOIN users u ON u.id = dl.driver_id
+      WHERE u.role = 'driver' AND u.status = 'approved' AND dl.is_online = 1
+      AND datetime(dl.updated_at) >= datetime('now', '-3 minutes')
+      ORDER BY dl.updated_at DESC`),
+    env.DB.prepare(`SELECT r.id, r.vehicle_type, r.status, r.payment_method,
+      r.origin_lat, r.origin_lng, r.destination_lat, r.destination_lng,
+      r.distance_km, r.duration_minutes, r.total_cents, r.created_at,
+      passenger.name AS passenger_name, passenger.phone AS passenger_phone,
+      driver.name AS driver_name, driver.phone AS driver_phone
+      FROM rides r
+      JOIN users passenger ON passenger.id = r.passenger_id
+      LEFT JOIN users driver ON driver.id = r.driver_id
+      WHERE r.status NOT IN ('completed', 'cancelled')
+      ORDER BY r.created_at DESC LIMIT 100`)
+  ]);
+  return json({
+    generatedAt: new Date().toISOString(),
+    onlineDrivers: onlineDrivers.results || [],
+    activeRides: activeRides.results || []
+  });
 }
 
 async function decideDriver(request, env, driverId, action) {

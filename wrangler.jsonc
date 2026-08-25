@@ -3,6 +3,7 @@
   "name": "aura-bae-api",
   "main": "src/worker.js",
   "compatibility_date": "2026-08-25",
+  "keep_vars": true,
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",

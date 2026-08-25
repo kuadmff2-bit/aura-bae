@@ -10,6 +10,7 @@ e Asaas para criar cobranças Pix dinâmicas.
 - Sessão em cookie `HttpOnly`, `Secure` e `SameSite=Strict`.
 - Passageiro, motorista e administrador com permissões separadas.
 - Aprovação administrativa dos motoristas.
+- Central administrativa com mapa de satélite, motoristas online e rotas ativas.
 - Localização real dos motoristas online e prioridade por proximidade.
 - Rotas viárias e cálculo de preço feito também no servidor.
 - Mototáxi, motocarro e carro.

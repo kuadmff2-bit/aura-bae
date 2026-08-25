@@ -104,10 +104,12 @@ O sistema só considera o Pix pago quando recebe `PAYMENT_RECEIVED`.
 1. Cadastre um motorista com CPF, veículo e chave Pix.
 2. Entre como administrador e aprove o cadastro.
 3. No celular do motorista, permita a localização e fique disponível.
-4. Em outro aparelho, cadastre um passageiro e solicite a corrida.
-5. O motorista aceita, inicia e confirma a chegada.
-6. Nesse momento o QR Code Pix é criado.
-7. Após o webhook confirmar o recebimento, o passageiro avalia a corrida.
+4. Confira no mapa administrativo se o motorista aparece online.
+5. Em outro aparelho, cadastre um passageiro e solicite a corrida.
+6. O motorista aceita, inicia e confirma a chegada.
+7. Acompanhe a rota e a situação da corrida na Central de Operações.
+8. Nesse momento o QR Code Pix é criado.
+9. Após o webhook confirmar o recebimento, o passageiro avalia a corrida.
 
 ## 8. Mude para produção
 

@@ -38,6 +38,14 @@ let activeRide = null;
 let ridePoller = null;
 let driverPoller = null;
 let locationPoller = null;
+let adminMap = null;
+let adminDriverLayer = null;
+let adminRideLayer = null;
+let adminRouteLayer = null;
+let adminPoller = null;
+let adminMapHasFitted = false;
+let adminRefreshRunning = false;
+const adminRouteCache = new Map();
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -56,6 +64,7 @@ async function api(path, options = {}) {
   return data;
 }
 function initials(name) { return name.split(" ").map(part => part[0]).slice(0, 2).join("").toUpperCase(); }
+function escapeHtml(value) { return String(value ?? "").replace(/[&<>'"]/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]); }
 function phoneText(phone) { return `(${phone.slice(0,2)}) ${phone.slice(2,7)}-${phone.slice(7)}`; }
 function pointText(point) { return point ? `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}` : "Toque no mapa para marcar"; }
 
@@ -91,6 +100,16 @@ $("#toggle-password").addEventListener("click", () => {
   $("#toggle-password").setAttribute("aria-label", visible ? "Mostrar senha" : "Ocultar senha");
   $("#toggle-password").setAttribute("aria-pressed", String(!visible));
 });
+
+$$('[data-password-target]').forEach(button => button.addEventListener("click", () => {
+  const input = document.getElementById(button.dataset.passwordTarget);
+  if (!input) return;
+  const willShow = input.type === "password";
+  input.type = willShow ? "text" : "password";
+  button.textContent = willShow ? "Ocultar" : "Mostrar";
+  button.setAttribute("aria-label", `${willShow ? "Ocultar" : "Mostrar"} ${input.id === "setup-token" ? "token" : "senha"}`);
+  button.setAttribute("aria-pressed", String(willShow));
+}));
 
 function setAuthMode(mode) {
   authMode = mode;
@@ -192,7 +211,6 @@ function enterApp(user) {
   showView(user.role === "admin" ? "admin" : user.role === "driver" ? "driver" : "passenger");
   if (user.role === "passenger") { $("#passenger-greeting").textContent = `Olá, ${user.name.split(" ")[0]}`; initializeMap(); resumePassengerRide(); }
   if (user.role === "driver") { renderDriverProfile(); resumeDriverRide(); }
-  if (user.role === "admin") renderAdmin();
   updateSupportLink();
 }
 
@@ -207,13 +225,14 @@ function showView(id) {
   $$('#main-nav [data-view]').forEach(button => button.classList.toggle("active", button.dataset.view === id));
   window.scrollTo({ top: 0, behavior: "smooth" });
   if (id === "passenger") setTimeout(() => cityMap?.invalidateSize(), 80);
-  if (id === "admin") renderAdmin();
+  if (id === "admin") startAdminMonitoring();
+  else clearInterval(adminPoller);
   if (id === "support") updateSupportLink();
 }
 
 $("#logout").addEventListener("click", async () => {
   clearInterval(ridePoller); clearInterval(driverPoller);
-  clearInterval(locationPoller);
+  clearInterval(locationPoller); clearInterval(adminPoller);
   try { await api("/api/auth/logout", { method: "POST" }); } catch {}
   currentUser = null;
   $("#app-shell").classList.add("hidden"); $("#auth-page").classList.remove("hidden");
@@ -584,14 +603,123 @@ $("#online-toggle").onclick = async () => {
   finally { $("#online-toggle").disabled = false; }
 };
 
+const operationStatusLabels = {
+  searching: "Buscando motorista",
+  accepted: "Motorista a caminho",
+  in_progress: "Em andamento",
+  arrived: "Chegou ao destino",
+  payment_pending: "Aguardando pagamento",
+  paid: "Pago • aguardando avaliação"
+};
+
+function initializeAdminMap() {
+  if (adminMap || !window.L || !$("#admin-operations-map")) return;
+  adminMap = L.map("admin-operations-map", { zoomControl: true }).setView([-2.79333, -57.07], 15);
+  L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19, attribution: "Tiles &copy; Esri" }).addTo(adminMap);
+  L.tileLayer("https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19, opacity: .9, attribution: "Ruas &copy; Esri" }).addTo(adminMap);
+  L.tileLayer("https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19, opacity: .95 }).addTo(adminMap);
+  adminRouteLayer = L.layerGroup().addTo(adminMap);
+  adminRideLayer = L.layerGroup().addTo(adminMap);
+  adminDriverLayer = L.layerGroup().addTo(adminMap);
+}
+
+function adminDriverIcon(driver) {
+  const vehicle = vehicles[driver.vehicle_type] || { code: "MO" };
+  return L.divIcon({
+    className: "admin-marker-wrap",
+    html: `<span class="admin-driver-marker"><b>${vehicle.code}</b><small>${escapeHtml(driver.name.split(" ")[0])}</small></span>`,
+    iconSize: [112, 40], iconAnchor: [56, 20]
+  });
+}
+
+function adminPointIcon(letter, destination = false) {
+  return L.divIcon({ className: "admin-marker-wrap", html: `<span class="admin-point-marker ${destination ? "destination" : ""}">${letter}</span>`, iconSize: [32, 32], iconAnchor: [16, 28] });
+}
+
+async function getAdminRoute(ride) {
+  if (adminRouteCache.has(ride.id)) return adminRouteCache.get(ride.id);
+  const fallback = [[ride.origin_lat, ride.origin_lng], [ride.destination_lat, ride.destination_lng]];
+  const routePromise = fetch(`https://router.project-osrm.org/route/v1/driving/${ride.origin_lng},${ride.origin_lat};${ride.destination_lng},${ride.destination_lat}?overview=full&geometries=geojson`)
+    .then(response => response.ok ? response.json() : null)
+    .then(data => data?.routes?.[0]?.geometry?.coordinates?.map(([lng, lat]) => [lat, lng]) || fallback)
+    .catch(() => fallback);
+  adminRouteCache.set(ride.id, routePromise);
+  return routePromise;
+}
+
+function renderActiveRideList(rides) {
+  $("#active-rides-list").innerHTML = rides.length ? rides.map(ride => {
+    const vehicle = vehicles[ride.vehicle_type] || { code: "?", name: "Transporte" };
+    const driver = ride.driver_name ? escapeHtml(ride.driver_name.split(" ")[0]) : "Aguardando motorista";
+    return `<button class="operation-ride" data-operation-ride="${ride.id}"><span class="operation-code">${vehicle.code}</span><span><small>${escapeHtml(operationStatusLabels[ride.status] || ride.status)}</small><strong>${escapeHtml(ride.passenger_name)}</strong><em>${vehicle.name} • ${driver}</em></span><b>${brl(ride.total_cents / 100)}</b></button>`;
+  }).join("") : `<div class="operations-empty"><span>✓</span><strong>Nenhuma corrida ativa</strong><small>Novas solicitações aparecerão aqui.</small></div>`;
+  $$('[data-operation-ride]').forEach(button => button.onclick = async () => {
+    const ride = rides.find(item => item.id === button.dataset.operationRide);
+    if (!ride || !adminMap) return;
+    const route = await getAdminRoute(ride);
+    adminMap.fitBounds(L.latLngBounds(route), { padding: [42, 42], maxZoom: 17 });
+  });
+}
+
+async function renderAdminOperations(operations) {
+  initializeAdminMap();
+  const drivers = operations.onlineDrivers || [], rides = operations.activeRides || [];
+  $("#online-count").textContent = drivers.length;
+  $("#active-ride-count").textContent = rides.length;
+  $("#operations-total").textContent = rides.length;
+  $("#operations-updated").textContent = `Atualizado às ${new Date(operations.generatedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`;
+  renderActiveRideList(rides);
+  if (!adminMap) return;
+  adminDriverLayer.clearLayers(); adminRideLayer.clearLayers(); adminRouteLayer.clearLayers();
+  const bounds = [];
+  drivers.forEach(driver => {
+    const point = [driver.latitude, driver.longitude]; bounds.push(point);
+    const vehicle = vehicles[driver.vehicle_type] || { name: "Motorista" };
+    L.marker(point, { icon: adminDriverIcon(driver), zIndexOffset: 300 }).bindPopup(`<strong>${escapeHtml(driver.name)}</strong><br>${escapeHtml(vehicle.name)}${driver.vehicle_model ? ` • ${escapeHtml(driver.vehicle_model)}` : ""}<br><small>Online agora</small>`).addTo(adminDriverLayer);
+  });
+  await Promise.all(rides.slice(0, 20).map(async ride => {
+    const origin = [ride.origin_lat, ride.origin_lng], destination = [ride.destination_lat, ride.destination_lng];
+    bounds.push(origin, destination);
+    const route = await getAdminRoute(ride);
+    const activeColor = ride.status === "in_progress" ? "#21d091" : ride.status === "searching" ? "#f4bd4d" : "#62a9ff";
+    L.polyline(route, { color: "#ffffff", weight: 9, opacity: .82 }).addTo(adminRouteLayer);
+    L.polyline(route, { color: activeColor, weight: 5, opacity: 1 }).bindTooltip(`${escapeHtml(ride.passenger_name)} • ${escapeHtml(operationStatusLabels[ride.status] || ride.status)}`).addTo(adminRouteLayer);
+    L.marker(origin, { icon: adminPointIcon("A") }).bindTooltip(`Saída • ${escapeHtml(ride.passenger_name)}`).addTo(adminRideLayer);
+    L.marker(destination, { icon: adminPointIcon("B", true) }).bindTooltip(`Destino • ${escapeHtml(ride.passenger_name)}`).addTo(adminRideLayer);
+  }));
+  if (!adminMapHasFitted && bounds.length) {
+    adminMap.fitBounds(L.latLngBounds(bounds), { padding: [45, 45], maxZoom: 16 });
+    adminMapHasFitted = true;
+  }
+  setTimeout(() => adminMap.invalidateSize(), 80);
+}
+
+function startAdminMonitoring() {
+  initializeAdminMap();
+  clearInterval(adminPoller);
+  renderAdmin();
+  adminPoller = setInterval(renderAdmin, 10000);
+  setTimeout(() => adminMap?.invalidateSize(), 100);
+}
+
 async function renderAdmin() {
+  if (adminRefreshRunning) return;
+  adminRefreshRunning = true;
   try {
-    const [summary, result] = await Promise.all([api("/api/admin/summary"), api("/api/admin/drivers")]);
+    const [summary, result, operations] = await Promise.all([api("/api/admin/summary"), api("/api/admin/drivers"), api("/api/admin/operations")]);
     const pending = result.drivers.filter(user => user.status === "pending");
     $("#approved-count").textContent = summary.approvedDrivers;
-    $("#pending-count").textContent = summary.pendingDrivers; $("#ride-count").textContent = summary.rides;
-    $("#pending-drivers").innerHTML = pending.length ? pending.map(user => `<div><b>${initials(user.name)}</b><p><strong>${user.name}</strong><span>${vehicles[user.vehicle_type].name} • ${phoneText(user.phone)}</span></p><button data-reject="${user.id}" class="danger-mini">Recusar</button><button data-approve="${user.id}" class="approve-mini">Aprovar</button></div>`).join("") : `<p class="muted">Nenhum cadastro aguardando análise.</p>`;
-  } catch (error) { $("#pending-drivers").innerHTML = `<p class="form-error">${error.message}</p>`; }
+    $("#pending-count").textContent = `${summary.pendingDrivers} pendente${summary.pendingDrivers === 1 ? "" : "s"}`;
+    $("#ride-count").textContent = summary.rides;
+    $("#pending-drivers").innerHTML = pending.length ? pending.map(user => {
+      const vehicleName = vehicles[user.vehicle_type]?.name || "Veículo não informado";
+      return `<div><b>${escapeHtml(initials(user.name))}</b><p><strong>${escapeHtml(user.name)}</strong><span>${escapeHtml(vehicleName)} • ${escapeHtml(phoneText(user.phone))}</span></p><button data-reject="${user.id}" class="danger-mini">Recusar</button><button data-approve="${user.id}" class="approve-mini">Aprovar</button></div>`;
+    }).join("") : `<p class="muted">Nenhum cadastro aguardando análise.</p>`;
+    await renderAdminOperations(operations);
+  } catch (error) {
+    $("#pending-drivers").innerHTML = `<p class="form-error">${escapeHtml(error.message)}</p>`;
+    if ($("#operations-updated")) $("#operations-updated").textContent = "Falha ao atualizar";
+  } finally { adminRefreshRunning = false; }
   $$('[data-approve]').forEach(button => button.onclick = () => decideDriver(button.dataset.approve, "approved"));
   $$('[data-reject]').forEach(button => button.onclick = () => decideDriver(button.dataset.reject, "rejected"));
 }
