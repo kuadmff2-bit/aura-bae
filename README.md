@@ -13,12 +13,13 @@ e Asaas para criar cobranças Pix dinâmicas.
 - Ativação automática do perfil de motorista com CPF, fotos e dados do veículo.
 - Perfil completo, alteração de senha e tutoriais de primeiro acesso.
 - Recuperação de senha assistida pelo administrador com link único de 15 minutos.
-- Visual escuro renovado, com cartões de alto contraste e navegação confortável no celular.
+- Visual escuro simplificado em grafite e verde, com cartões de alto contraste e navegação confortável no celular.
 - Central administrativa com mapa urbano escuro, motoristas online e rotas ativas.
 - Localização real dos motoristas online e prioridade por proximidade.
 - Acompanhamento do motorista no mapa, rota até o passageiro e fotos do cadastro.
-- Mapa ampliado com pesquisa de locais, marcação manual, pinos ajustáveis e rotas viárias.
-- Mapa em estilo urbano, com ruas, comércios e pontos de interesse destacados.
+- Mapa compacto na tela principal e modo ampliado para marcação manual.
+- Pesquisa de saída e destino somente ao tocar em `Buscar`, com resultados limitados a Barreirinha.
+- Mapa urbano noturno mais claro, com ruas, comércios e pontos de interesse cadastrados no OpenStreetMap.
 - Rotas viárias e cálculo de preço feito também no servidor.
 - Mototáxi, motocarro e carro, com mototáxi selecionado inicialmente.
 - Pagamento Pix criado somente quando o motorista confirma a chegada.
@@ -29,6 +30,7 @@ e Asaas para criar cobranças Pix dinâmicas.
 - Em dinheiro, o sistema desconta da carteira somente a comissão e a taxa fixa.
 - Comissão de 10% sobre a corrida e taxa fixa de R$ 1,00.
 - Cancelamento automático de chamadas sem atualização por 5 minutos.
+- Cancelamento manual do passageiro sem cobrança, com aviso de uso responsável antes da confirmação.
 - Limpeza automática dos pontos e da rota assim que a corrida do passageiro termina.
 - Livro-caixa interno para o saldo do motorista.
 - Rotina de repasse diário preparada, mas desligada por segurança até a homologação.
@@ -62,3 +64,10 @@ npm run deploy
 ```
 
 O comando `npm run deploy` aplica primeiro as migrações do D1 e depois publica o Worker.
+
+## Observação sobre o mapa
+
+A pesquisa pública do Nominatim é acionada somente pelo botão `Buscar`, passa pelo
+Worker e usa cache. Não transforme essa pesquisa em autocomplete. Os pontos comerciais
+mostrados dependem dos dados que estiverem cadastrados no OpenStreetMap. Para operação
+comercial em maior escala, contrate geocodificação e rotas com suporte e SLA próprios.

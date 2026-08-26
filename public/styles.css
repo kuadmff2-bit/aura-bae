@@ -297,3 +297,105 @@ html[data-theme=dark] footer{background:#03100b;border-color:#17352a;color:#b8ca
   html[data-theme=dark] .primary,
   html[data-theme=dark] .secondary{min-height:56px}
 }
+
+/* Aura Bae 2.6 — pesquisa explícita, mapa compacto e noite simplificada */
+.compact-route-search{display:grid;gap:9px;margin-top:15px}
+.compact-search-heading{display:flex;align-items:center;gap:10px;margin-bottom:2px}
+.compact-search-heading>span{width:38px;height:38px;display:grid;place-items:center;flex:none;border-radius:12px;background:var(--green);color:#fff;font-size:21px;font-weight:900}
+.compact-search-heading>div{display:grid}
+.compact-search-heading strong{font-size:13px}
+.compact-search-heading small{color:var(--muted);font-size:9px;font-weight:600}
+.compact-search-field{position:relative;display:grid!important;grid-template-columns:34px minmax(0,1fr);align-items:center;gap:9px;margin:0!important;padding:8px 9px;border:1px solid var(--line);border-radius:15px;background:var(--soft)}
+.compact-search-field>i{width:32px;height:32px;display:grid;place-items:center;border-radius:50%;background:var(--green);color:#fff;font-size:9px;font-style:normal;font-weight:950}
+.compact-search-field:nth-of-type(2)>i{background:var(--yellow);color:#1b2d26}
+.compact-search-field>span{display:grid;min-width:0;color:inherit!important;font-size:inherit!important;font-weight:inherit!important;text-transform:none!important}
+.compact-search-field small{color:var(--muted);font-size:8px;font-weight:850;text-transform:uppercase;letter-spacing:.08em}
+.search-input-row{display:grid!important;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:7px;min-width:0;color:inherit!important;font-size:inherit!important;text-transform:none!important}
+.search-input-row input{min-width:0;min-height:35px;padding:0 4px;border:0;border-radius:0;background:transparent;outline:0;font-size:12px}
+.search-input-row button{min-height:34px;padding:0 12px;border:0;border-radius:10px;background:var(--green);color:#fff;font-size:9px;font-weight:900}
+.search-input-row button:disabled{opacity:.55;cursor:wait}
+.compact-search-field .map-search-results{top:calc(100% + 6px)}
+.route-choice-divider{display:flex;align-items:center;gap:9px;margin:12px 0 -2px;color:var(--muted);font-size:9px;font-weight:850;text-transform:uppercase}
+.route-choice-divider:before,.route-choice-divider:after{content:"";height:1px;flex:1;background:var(--line)}
+.city-map-shell:not(.expanded) .map-toolbar,.city-map-shell:not(.expanded) .map-category-chips{display:none}
+.city-map-shell:not(.expanded){height:255px}
+.city-map-shell.expanded{grid-template-rows:auto auto auto auto minmax(0,1fr) auto!important}
+.city-map-shell.expanded .map-category-chips{display:flex;gap:7px;overflow-x:auto;padding:8px max(16px,env(safe-area-inset-left));border-bottom:1px solid var(--line);background:var(--paper);scrollbar-width:none;z-index:1001}
+.map-category-chips::-webkit-scrollbar{display:none}
+.map-category-chips button{min-height:34px;flex:none;padding:0 13px;border:1px solid var(--line);border-radius:99px;background:var(--soft);color:var(--muted);font-size:9px;font-weight:850}
+.map-category-chips button.active{border-color:var(--green);background:var(--green);color:#fff}
+.city-map-shell.expanded .map-toolbar{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;margin:0;padding:8px max(16px,env(safe-area-inset-left));border-bottom:1px solid var(--line);background:var(--paper);z-index:1001}
+.city-map-shell.expanded .map-toolbar button{min-width:0;margin:0;padding:0 8px;white-space:nowrap}
+.city-map-shell.expanded .map-search-panel>label{padding:6px 9px}
+.city-map-shell.expanded .map-search-panel>label>span{min-width:0}
+.city-map-shell.expanded .map-search-panel .search-input-row{grid-template-columns:minmax(0,1fr) auto}
+.city-map-shell.expanded .map-chip{top:auto!important;bottom:92px!important;left:18px!important}
+.city-map-shell.expanded .map-message{bottom:137px!important}
+.poi-marker-wrap{border:0!important;background:transparent!important}
+.poi-map-marker{height:30px;display:flex;align-items:center;gap:5px;color:#eef8f3;filter:drop-shadow(0 3px 4px rgba(0,0,0,.8))}
+.poi-map-marker i{width:26px;height:26px;display:grid;place-items:center;flex:none;border:2px solid #d7eee5;border-radius:50%;background:#536d62;color:#fff;font-size:10px;font-style:normal;font-weight:950}
+.poi-map-marker b{max-width:138px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:3px 6px;border-radius:6px;background:rgba(12,19,16,.82);font-size:9px;line-height:1.25}
+.poi-map-marker.food i{background:#b67446}.poi-map-marker.shopping i{background:#3979a8}.poi-map-marker.health i{background:#ba5e65}.poi-map-marker.hotel i{background:#715fa5}.poi-map-marker.education i{background:#398566}
+.cancel-warning-open{overflow:hidden}
+.cancel-warning-modal{position:fixed;inset:0;z-index:2800;display:grid;place-items:center;padding:18px;background:rgba(0,0,0,.78);backdrop-filter:blur(8px)}
+.cancel-warning-modal article{width:min(470px,100%);padding:26px;border:1px solid var(--line);border-radius:24px;background:var(--paper);box-shadow:0 28px 90px rgba(0,0,0,.52);text-align:center}
+.cancel-warning-modal .warning-icon{width:58px;height:58px;display:grid;place-items:center;margin:0 auto 12px;border-radius:18px;background:#412522;color:#ff9b91;font-size:25px;font-weight:950}
+.cancel-warning-modal article>small{color:#ff8a80;font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.12em}
+.cancel-warning-modal h2{margin:5px 0 8px;font-size:25px}
+.cancel-warning-modal p{margin:0;color:var(--muted);font-size:12px;line-height:1.6}
+.cancel-warning-modal article>div{display:grid;grid-template-columns:1.25fr 1fr;gap:8px;margin-top:19px}
+.cancel-warning-modal .secondary{margin:0}
+.danger-button{min-height:49px;border:1px solid #78413c;border-radius:13px;background:#321c1a;color:#ff9a90;font-weight:900}
+.danger-button:disabled{opacity:.55}
+
+html[data-theme=dark]{--ink:#eef5f1;--muted:#929d97;--green:#20c98b;--dark:#050706;--soft:#151a17;--cream:#080a09;--paper:#101311;--yellow:#e6ae42;--line:#29302c;--red:#ff776d}
+html[data-theme=dark] body,html[data-theme=dark] .auth-page{background:#080a09!important}
+html[data-theme=dark] .app-header{background:rgba(8,10,9,.97);border-color:#222824}
+html[data-theme=dark] .role-nav{background:#121614;border:1px solid #242b27}
+html[data-theme=dark] .role-nav button.active{background:#19a874;color:#fff}
+html[data-theme=dark] .card,html[data-theme=dark] .auth-card,html[data-theme=dark] .route-card,html[data-theme=dark] .summary,html[data-theme=dark] .operations-card{background:#101311;border-color:#272e2a;box-shadow:0 12px 34px rgba(0,0,0,.24)}
+html[data-theme=dark] .summary:before{display:none}
+html[data-theme=dark] .vehicle-grid button,html[data-theme=dark] .map-open-button,html[data-theme=dark] .map-toolbar button,html[data-theme=dark] .point-summary>div,html[data-theme=dark] .compact-search-field,html[data-theme=dark] .payment-choice select{background:#151a17;border-color:#2a322d;box-shadow:none}
+html[data-theme=dark] .vehicle-grid button:hover{transform:none}
+html[data-theme=dark] .vehicle-grid button.active{background:#14241d;border-color:#25c98c;box-shadow:0 0 0 1px rgba(37,201,140,.12)}
+html[data-theme=dark] .map-open-button>span,html[data-theme=dark] .point-summary>div>i,html[data-theme=dark] .nearby-driver-icon,html[data-theme=dark] .transport-title>span,html[data-theme=dark] .compact-search-heading>span{background:#19a874;box-shadow:none}
+html[data-theme=dark] .primary{background:#20c98b;box-shadow:none;color:#042117}
+html[data-theme=dark] .primary:not(:disabled):hover{filter:brightness(1.06);transform:none}
+html[data-theme=dark] .secondary{background:#171c19;border-color:#2c342f;color:#8ce3bd}
+html[data-theme=dark] .nearby-driver,html[data-theme=dark] .route-result,html[data-theme=dark] .status-panel,html[data-theme=dark] .assigned-driver-card{background:#101512;border-color:#28332d}
+html[data-theme=dark] .nearby-driver.ready,html[data-theme=dark] .route-result{background:#102019}
+html[data-theme=dark] .city-map-shell,html[data-theme=dark] .admin-map-shell{background:#17211d;border-color:#3a594b;box-shadow:0 14px 38px rgba(0,0,0,.32)}
+html[data-theme=dark] .leaflet-tile-pane{filter:saturate(.72) contrast(.92) brightness(1.32)}
+html[data-theme=dark] .map-chip,html[data-theme=dark] .operations-legend{background:rgba(10,16,13,.9);border-color:#385447;color:#8ce3bd;box-shadow:none}
+html[data-theme=dark] .map-message{background:rgba(15,24,20,.95);border-color:#3a5549;color:#a5e9ca}
+html[data-theme=dark] .city-map-shell.expanded .map-picker-header,html[data-theme=dark] .city-map-shell.expanded .map-search-panel,html[data-theme=dark] .city-map-shell.expanded .map-category-chips,html[data-theme=dark] .city-map-shell.expanded .map-toolbar,html[data-theme=dark] .city-map-shell.expanded .map-picker-footer{background:#0d100e;border-color:#272e2a}
+html[data-theme=dark] .search-input-row button,html[data-theme=dark] .map-category-chips button.active{background:#20c98b;color:#052016}
+html[data-theme=dark] footer{background:#070a08;border-color:#252c28}
+
+@media(max-width:760px){
+  .city-map-shell:not(.expanded){height:235px!important;border-radius:18px!important}
+  #passenger.ride-active .city-map-shell:not(.expanded){height:320px!important}
+  .city-map-shell.expanded .map-search-panel{grid-template-columns:1fr 1fr!important}
+  .city-map-shell.expanded .map-toolbar{grid-template-columns:1fr 1fr}
+  .city-map-shell.expanded .map-chip{bottom:91px!important}
+  .city-map-shell.expanded .map-message{bottom:136px!important}
+}
+@media(max-width:620px){
+  .compact-search-heading small{font-size:8px}
+  .compact-search-field{grid-template-columns:31px minmax(0,1fr);padding:7px}
+  .compact-search-field>i{width:29px;height:29px}
+  .search-input-row{grid-template-columns:minmax(0,1fr) auto!important}
+  .search-input-row input{font-size:11px}
+  .search-input-row button{padding-inline:10px}
+  .point-summary{grid-template-columns:1fr 1fr!important}
+  .point-summary>div{min-height:58px!important;padding:8px!important}
+  .point-summary p strong{font-size:9px!important}
+  .city-map-shell.expanded .map-search-panel{grid-template-columns:1fr!important;gap:7px;padding:8px 10px!important}
+  .city-map-shell.expanded .map-category-chips{padding:7px 10px}
+  .city-map-shell.expanded .map-toolbar{padding:7px 10px}
+  .city-map-shell.expanded .map-toolbar button{min-height:39px;font-size:9px}
+  .cancel-warning-modal{align-items:end;padding:0}
+  .cancel-warning-modal article{width:100%;padding:22px 18px max(18px,env(safe-area-inset-bottom));border-radius:25px 25px 0 0}
+  .cancel-warning-modal article>div{grid-template-columns:1fr}
+  .danger-button{min-height:54px}
+}

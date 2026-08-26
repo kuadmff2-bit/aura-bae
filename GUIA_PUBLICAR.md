@@ -23,8 +23,8 @@ Esta é a opção certa para a instalação que já está funcionando:
    binding `DB`.
 5. No Cloudflare, abra **Deployments** e acompanhe a nova implantação. Se ela não
    começar automaticamente, use **Retry build**.
-6. O comando `npm run deploy` executará a nova migração da carteira antes de
-   publicar o site.
+6. O comando `npm run deploy` verificará as migrações do banco antes de publicar
+   a versão 2.6 do site.
 
 Como o nome do Worker continua sendo `aura-bae`, o endereço do webhook do Asaas
 permanece o mesmo. Não crie outro Worker e não troque a URL do webhook.
@@ -196,6 +196,10 @@ imediatamente da carteira pré-paga do motorista.
 - Para crescimento em produção, migrar as fotos do D1 para o Cloudflare R2.
 - Contratar um serviço de mapas/rotas com garantia para produção; o roteador público
   usado no projeto não oferece SLA comercial.
+- A busca do mapa público deve continuar sendo executada somente após o usuário
+  tocar em **Buscar**, sem autocomplete. Os pontos comerciais exibidos são os que
+  estiverem cadastrados no OpenStreetMap.
 - Publicar Termos de Uso e Política de Privacidade compatíveis com a LGPD.
-- Testar cancelamentos, reembolsos e indisponibilidade do Asaas.
+- Testar cancelamento manual sem taxa, cancelamento automático, reembolsos e
+  indisponibilidade do Asaas.
 - Confirmar com contador a parte fiscal e a forma de registrar as comissões.

@@ -80,6 +80,12 @@ globalThis.fetch = async (input, options = {}) => {
       { place_id: 2, display_name: "Fora da cidade", type: "place", lat: "-3.10", lon: "-60.00" }
     ]);
   }
+  if (url.includes("overpass-api.de/api/interpreter")) {
+    return Response.json({ elements: [
+      { type: "node", id: 10, lat: -2.7932, lon: -57.0698, tags: { name: "Mercadinho Teste", shop: "supermarket" } },
+      { type: "way", id: 11, center: { lat: -2.794, lon: -57.071 }, tags: { name: "Lanchonete Teste", amenity: "fast_food" } }
+    ] });
+  }
   if (url.endsWith("/customers") && options.method === "POST") return Response.json({ id: "cus_smoke" });
   if (url.endsWith("/payments") && options.method === "POST") return Response.json({ id: "pay_wallet_smoke", status: "PENDING" });
   if (url.endsWith("/payments/pay_wallet_smoke/pixQrCode")) return Response.json({ payload: "PIX-SMOKE", encodedImage: "AA==", expirationDate: null });
@@ -129,6 +135,9 @@ assert(wrongMode.response.status === 403, "passageiro sem perfil não deveria en
 
 const mapSearch = await call("/api/map/search?q=porto", { cookie: passenger.cookie });
 assert(mapSearch.response.status === 200 && mapSearch.data.places?.length === 1, "pesquisa no mapa não respeitou Barreirinha");
+const mapPois = await call("/api/map/pois", { cookie: passenger.cookie });
+assert(mapPois.response.status === 200 && mapPois.data.places?.length === 2, "pontos comerciais não foram carregados");
+assert(mapPois.data.places.some(place => place.category === "shopping"), "categoria de comércio inválida");
 
 const driverLogin = await call("/api/auth/login", {
   method: "POST",
@@ -181,4 +190,19 @@ assert(topup.response.status === 201 && topup.data.topup.payload === "PIX-SMOKE"
 const wallet = await call("/api/driver/wallet", { cookie: driverLogin.cookie });
 assert(wallet.response.status === 200 && wallet.data.balanceCents === 1330, "recarga Pix não foi confirmada na carteira");
 
-console.log("Smoke test OK: acesso separado, fotos, corrida em dinheiro e carteira Pix.");
+const cancellable = await call("/api/rides", {
+  method: "POST", cookie: passenger.cookie,
+  body: {
+    vehicleType: "mototaxi", paymentMethod: "PIX",
+    origin: { lat: -2.79333, lng: -57.07 }, destination: { lat: -2.79, lng: -57.068 }
+  }
+});
+assert(cancellable.response.status === 201, `criar corrida cancelável: ${cancellable.data.error}`);
+const cancellableId = cancellable.data.ride.id;
+assert((await call(`/api/rides/${cancellableId}/accept`, { method: "POST", cookie: driverLogin.cookie })).response.status === 200, "aceite da corrida cancelável falhou");
+const cancelled = await call(`/api/rides/${cancellableId}/cancel`, { method: "POST", cookie: passenger.cookie });
+assert(cancelled.response.status === 200 && cancelled.data.cancellationFeeCents === 0, "cancelamento do passageiro deveria ser gratuito");
+const cancelledRow = await database.prepare("SELECT cancel_fee_cents, status FROM rides WHERE id = ?").bind(cancellableId).first();
+assert(cancelledRow.status === "cancelled" && Number(cancelledRow.cancel_fee_cents) === 0, "banco registrou taxa de cancelamento indevida");
+
+console.log("Smoke test OK: acesso separado, mapa com pesquisa e comércios, fotos, carteira e cancelamento sem taxa.");

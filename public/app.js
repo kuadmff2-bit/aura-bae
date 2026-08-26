@@ -7,7 +7,7 @@ const brl = value => {
 };
 const supportPhone = "5597991376123";
 const platformFee = 1;
-const themeStorageKey = "aura-theme-v2.5";
+const themeStorageKey = "aura-theme-v2.6";
 const mapHome = [-2.79333, -57.07];
 const mapHomeZoom = 15;
 
@@ -34,8 +34,11 @@ let cityMap = null;
 let cityBaseLayer = null;
 let adminBaseLayer = null;
 let mapPickerSnapshot = null;
-let mapSearchTimer = null;
 let mapSearchController = null;
+let poiLayer = null;
+let poiPlaces = [];
+let poiLoaded = false;
+let activePoiFilter = "all";
 let originPoint = null;
 let destinationPoint = null;
 let pickMode = "origin";
@@ -88,7 +91,7 @@ async function api(path, options = {}) {
 function initials(name) { return name.split(" ").map(part => part[0]).slice(0, 2).join("").toUpperCase(); }
 function escapeHtml(value) { return String(value ?? "").replace(/[&<>'"]/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]); }
 function phoneText(phone) { return `(${phone.slice(0,2)}) ${phone.slice(2,7)}-${phone.slice(7)}`; }
-function pointText(point) { return point ? point.label || `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}` : "Toque no mapa para marcar"; }
+function pointText(point) { return point ? point.label || `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}` : "Pesquise ou marque no mapa"; }
 function shortPlaceName(name) {
   const parts = String(name || "").split(",").map(part => part.trim()).filter(Boolean);
   return parts.slice(0, 2).join(", ") || "Local marcado";
@@ -574,8 +577,8 @@ $("#logout").addEventListener("click", async () => {
 function mapTileSpec() {
   const dark = document.documentElement.dataset.theme === "dark";
   return dark
-    ? { url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", attribution: "Ruas &copy; OpenStreetMap, mapa &copy; CARTO" }
-    : { url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", attribution: "Ruas &copy; OpenStreetMap, mapa &copy; CARTO" };
+    ? { url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", attribution: "&copy; <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a> &copy; <a href='https://carto.com/attributions'>CARTO</a>" }
+    : { url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", attribution: "&copy; <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a> &copy; <a href='https://carto.com/attributions'>CARTO</a>" };
 }
 
 function updateMapBaseLayers() {
@@ -592,14 +595,71 @@ function updateMapBaseLayers() {
   }
 }
 
+const poiVisuals = {
+  food: { icon: "●", label: "Comer" },
+  shopping: { icon: "◆", label: "Comprar" },
+  health: { icon: "+", label: "Saúde" },
+  hotel: { icon: "■", label: "Hospedagem" },
+  education: { icon: "E", label: "Educação" },
+  service: { icon: "•", label: "Serviço" }
+};
+
+function poiMarkerIcon(place, showLabel) {
+  const visual = poiVisuals[place.category] || poiVisuals.service;
+  return L.divIcon({
+    className: "poi-marker-wrap",
+    html: `<span class="poi-map-marker ${escapeHtml(place.category)}"><i>${visual.icon}</i>${showLabel ? `<b>${escapeHtml(place.name)}</b>` : ""}</span>`,
+    iconSize: showLabel ? [170, 30] : [30, 30],
+    iconAnchor: [15, 15]
+  });
+}
+
+function renderMapPois() {
+  if (!cityMap || !poiLoaded) return;
+  poiLayer?.remove();
+  poiLayer = L.layerGroup().addTo(cityMap);
+  const showLabels = cityMap.getZoom() >= 16;
+  poiPlaces
+    .filter(place => activePoiFilter === "all" || place.category === activePoiFilter)
+    .slice(0, 160)
+    .forEach(place => {
+      const marker = L.marker([place.lat, place.lng], {
+        icon: poiMarkerIcon(place, showLabels),
+        keyboard: false,
+        zIndexOffset: -120
+      }).addTo(poiLayer);
+      marker.bindTooltip(`${place.name} • ${(poiVisuals[place.category] || poiVisuals.service).label}`, {
+        direction: "top",
+        offset: [0, -13]
+      });
+    });
+}
+
+async function loadMapPois() {
+  if (poiLoaded) return renderMapPois();
+  try {
+    const result = await api("/api/map/pois");
+    poiPlaces = Array.isArray(result.places) ? result.places : [];
+  } catch {
+    poiPlaces = [];
+  }
+  poiLoaded = true;
+  renderMapPois();
+}
+
 function initializeMap() {
   if (cityMap || !window.L) return setTimeout(() => cityMap?.invalidateSize(), 80);
   cityMap = L.map("city-map", { zoomControl: true }).setView(mapHome, mapHomeZoom);
   updateMapBaseLayers();
+  cityMap.on("zoomend", renderMapPois);
   cityMap.on("click", event => {
     if (activeRide) {
       $("#map-message").textContent = "Finalize ou cancele a corrida atual antes de alterar a rota.";
       $("#map-message").classList.remove("hidden");
+      return;
+    }
+    if (!$("#city-map-shell").classList.contains("expanded")) {
+      openMapPicker();
       return;
     }
     resetPassenger();
@@ -607,6 +667,7 @@ function initializeMap() {
     else { destinationPoint = event.latlng; reversePointLabel("destination", destinationPoint); }
     renderRoute();
   });
+  void loadMapPois();
   renderRoute();
 }
 
@@ -625,15 +686,22 @@ async function reversePointLabel(kind, point) {
     if (!current || `${current.lat.toFixed(6)},${current.lng.toFixed(6)}` !== expected || !result.name) return;
     current.label = shortPlaceName(result.name);
     $(`#${kind}-label`).textContent = pointText(current);
-    $(`#${kind}-search`).value = current.label;
+    syncMapSearchFields(kind, current.label);
   } catch {}
+}
+
+function syncMapSearchFields(kind, value = "") {
+  [`#${kind}-search`, `#compact-${kind}-search`].forEach(selector => {
+    const input = $(selector);
+    if (input) input.value = value;
+  });
 }
 
 function openMapPicker() {
   if (activeRide) return;
   mapPickerSnapshot = { origin: cloneMapPoint(originPoint), destination: cloneMapPoint(destinationPoint), pickMode };
-  $("#origin-search").value = originPoint?.label || "";
-  $("#destination-search").value = destinationPoint?.label || "";
+  syncMapSearchFields("origin", originPoint?.label || "");
+  syncMapSearchFields("destination", destinationPoint?.label || "");
   $("#city-map-shell").classList.add("expanded");
   document.body.classList.add("map-picker-open");
   setTimeout(() => {
@@ -647,6 +715,8 @@ function closeMapPicker(save = true) {
     originPoint = cloneMapPoint(mapPickerSnapshot.origin);
     destinationPoint = cloneMapPoint(mapPickerSnapshot.destination);
     pickMode = mapPickerSnapshot.pickMode;
+    syncMapSearchFields("origin", originPoint?.label || "");
+    syncMapSearchFields("destination", destinationPoint?.label || "");
     renderRoute();
   }
   mapPickerSnapshot = null;
@@ -657,15 +727,27 @@ function closeMapPicker(save = true) {
   setTimeout(() => cityMap?.invalidateSize(), 80);
 }
 
-async function searchMap(kind, query) {
-  const results = $(`#${kind}-search-results`);
+function mapSearchElements(kind, scope) {
+  const prefix = scope === "compact" ? "compact-" : "";
+  return {
+    input: $(`#${prefix}${kind}-search`),
+    button: $(`#${prefix}${kind}-search-button`),
+    results: $(`#${prefix}${kind}-search-results`)
+  };
+}
+
+async function searchMap(kind, scope = "expanded") {
+  const { input, button, results } = mapSearchElements(kind, scope);
+  const query = input?.value || "";
   mapSearchController?.abort();
   if (query.trim().length < 3) {
-    results.classList.add("hidden");
-    results.innerHTML = "";
+    results.innerHTML = `<p>Digite pelo menos 3 letras para pesquisar.</p>`;
+    results.classList.remove("hidden");
     return;
   }
   mapSearchController = new AbortController();
+  button.disabled = true;
+  button.textContent = "Buscando…";
   results.innerHTML = `<p>Pesquisando em Barreirinha…</p>`;
   results.classList.remove("hidden");
   try {
@@ -674,13 +756,13 @@ async function searchMap(kind, query) {
     if (!response.ok) throw new Error(data.error || "Não foi possível pesquisar agora.");
     const places = data.places || [];
     results.innerHTML = places.length ? places.map((place, index) => `<button type="button" data-place-index="${index}"><strong>${escapeHtml(place.name.split(",")[0])}</strong><small>${escapeHtml(place.name)}</small></button>`).join("") : `<p>Nenhum resultado exato. Marque o ponto diretamente no mapa.</p>`;
-    $$(`#${kind}-search-results [data-place-index]`).forEach(button => button.onclick = () => {
+    [...results.querySelectorAll("[data-place-index]")].forEach(button => button.onclick = () => {
       const place = places[Number(button.dataset.placeIndex)];
       const point = L.latLng(place.lat, place.lng);
       point.label = shortPlaceName(place.name);
       if (kind === "origin") { originPoint = point; pickMode = "destination"; }
       else { destinationPoint = point; pickMode = "destination"; }
-      $(`#${kind}-search`).value = point.label;
+      syncMapSearchFields(kind, point.label);
       results.classList.add("hidden");
       renderRoute();
       cityMap.setView(point, 17);
@@ -688,19 +770,36 @@ async function searchMap(kind, query) {
     });
   } catch (error) {
     if (error.name !== "AbortError") results.innerHTML = `<p>${escapeHtml(error.message)} Marque no mapa se preferir.</p>`;
+  } finally {
+    button.disabled = false;
+    button.textContent = "Buscar";
   }
 }
 
-function bindMapSearch(kind) {
-  $(`#${kind}-search`).addEventListener("input", event => {
-    clearTimeout(mapSearchTimer);
-    mapSearchTimer = setTimeout(() => searchMap(kind, event.target.value), 650);
+function bindMapSearch(kind, scope = "expanded") {
+  const { input, button, results } = mapSearchElements(kind, scope);
+  input.addEventListener("input", () => {
+    results.classList.add("hidden");
+    results.innerHTML = "";
   });
-  $(`#${kind}-search`).addEventListener("focus", () => { pickMode = kind; renderRoute(); });
+  input.addEventListener("focus", () => { pickMode = kind; renderRoute(); });
+  input.addEventListener("keydown", event => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    void searchMap(kind, scope);
+  });
+  button.addEventListener("click", () => searchMap(kind, scope));
 }
 
 bindMapSearch("origin");
 bindMapSearch("destination");
+bindMapSearch("origin", "compact");
+bindMapSearch("destination", "compact");
+$$("[data-poi-filter]").forEach(button => button.onclick = () => {
+  activePoiFilter = button.dataset.poiFilter;
+  $$('[data-poi-filter]').forEach(item => item.classList.toggle("active", item === button));
+  renderMapPois();
+});
 $("#open-map-picker").onclick = openMapPicker;
 $("#close-map-picker").onclick = () => closeMapPicker(false);
 $("#cancel-map-picker").onclick = () => closeMapPicker(false);
@@ -908,7 +1007,13 @@ async function renderRoute() {
 
 $("#pick-origin").onclick = () => { pickMode = "origin"; renderRoute(); };
 $("#pick-destination").onclick = () => { pickMode = "destination"; renderRoute(); };
-$("#swap").onclick = () => { [originPoint, destinationPoint] = [destinationPoint, originPoint]; renderRoute(); resetPassenger(); };
+$("#swap").onclick = () => {
+  [originPoint, destinationPoint] = [destinationPoint, originPoint];
+  syncMapSearchFields("origin", originPoint?.label || "");
+  syncMapSearchFields("destination", destinationPoint?.label || "");
+  renderRoute();
+  resetPassenger();
+};
 
 function clearRouteSelection({ resetMap = false, closePicker = false } = {}) {
   routeController?.abort();
@@ -917,8 +1022,8 @@ function clearRouteSelection({ resetMap = false, closePicker = false } = {}) {
   destinationPoint = null;
   pickMode = "origin";
   mapPickerSnapshot = null;
-  $("#origin-search").value = "";
-  $("#destination-search").value = "";
+  syncMapSearchFields("origin", "");
+  syncMapSearchFields("destination", "");
   $$(".map-search-results").forEach(list => {
     list.innerHTML = "";
     list.classList.add("hidden");
@@ -1090,7 +1195,7 @@ function handleExpiredPassengerRide(ride = null) {
 }
 
 function setRideControlsLocked(locked) {
-  $$('[data-vehicle], #pick-origin, #pick-destination, #swap, #clear-route, #open-map-picker, #payment-method').forEach(control => control.disabled = locked);
+  $$('[data-vehicle], #pick-origin, #pick-destination, #swap, #clear-route, #open-map-picker, #payment-method, #origin-search, #destination-search, #origin-search-button, #destination-search-button, #compact-origin-search, #compact-destination-search, #compact-origin-search-button, #compact-destination-search-button').forEach(control => control.disabled = locked);
 }
 
 function renderPixPayment(payment, ride) {
@@ -1127,14 +1232,43 @@ function showRating(completedRideId) {
   };
 }
 
-$("#cancel-button").onclick = async () => {
+function closeCancelWarning() {
+  $("#cancel-warning-modal").classList.add("hidden");
+  document.body.classList.remove("cancel-warning-open");
+}
+
+$("#cancel-button").onclick = () => {
   if (!activeRide) return resetPassenger();
-  if (!confirm("Deseja cancelar esta corrida? Pode haver taxa após o motorista aceitar.")) return;
+  $("#cancel-warning-modal").classList.remove("hidden");
+  document.body.classList.add("cancel-warning-open");
+};
+
+$("#keep-ride").onclick = closeCancelWarning;
+$("#cancel-warning-modal").onclick = event => {
+  if (event.target.id === "cancel-warning-modal") closeCancelWarning();
+};
+
+$("#confirm-cancel-ride").onclick = async () => {
+  if (!activeRide) return closeCancelWarning();
+  const button = $("#confirm-cancel-ride");
+  button.disabled = true;
+  button.textContent = "Cancelando…";
   try {
-    const result = await api(`/api/rides/${activeRide.id}/cancel`, { method: "POST" });
-    clearInterval(ridePoller); activeRide = null; setRideControlsLocked(false); resetPassenger();
-    if (result.cancellationFeeCents) alert(`Taxa de cancelamento: ${brl(result.cancellationFeeCents / 100)}.`);
-  } catch (error) { alert(error.message); }
+    await api(`/api/rides/${activeRide.id}/cancel`, { method: "POST" });
+    clearInterval(ridePoller);
+    activeRide = null;
+    setRideControlsLocked(false);
+    resetPassenger();
+    closeCancelWarning();
+    $("#map-message").textContent = "Corrida cancelada sem cobrança. Peça novamente quando precisar.";
+    $("#map-message").classList.remove("hidden");
+  } catch (error) {
+    closeCancelWarning();
+    alert(error.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = "Cancelar mesmo assim";
+  }
 };
 
 function renderDriverProfile() {

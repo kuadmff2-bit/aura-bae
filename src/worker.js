@@ -91,8 +91,9 @@ async function routeApi(request, env, ctx, url) {
   if (pathname === "/api/profile/password" && request.method === "POST") return changePassword(request, env);
   if (pathname === "/api/profile/pix" && request.method === "POST") return changePixKey(request, env);
   if (pathname === "/api/profile/tutorial" && request.method === "POST") return markTutorialSeen(request, env);
-  if (pathname === "/api/map/search" && request.method === "GET") return searchMapPlaces(request, env, url);
-  if (pathname === "/api/map/reverse" && request.method === "GET") return reverseMapPlace(request, env, url);
+  if (pathname === "/api/map/search" && request.method === "GET") return searchMapPlaces(request, env, ctx, url);
+  if (pathname === "/api/map/reverse" && request.method === "GET") return reverseMapPlace(request, env, ctx, url);
+  if (pathname === "/api/map/pois" && request.method === "GET") return mapPointsOfInterest(request, env, ctx);
   if (pathname === "/api/driver/apply" && request.method === "POST") return applyAsDriver(request, env);
   if (pathname === "/api/driver/status" && request.method === "POST") return updateDriverStatus(request, env);
   if (pathname === "/api/driver/wallet" && request.method === "GET") return driverWallet(request, env);
@@ -407,11 +408,29 @@ async function cleanupInactiveRides(env) {
   await expirePasswordResets(env);
 }
 
-async function searchMapPlaces(request, env, url) {
+function publicMapCacheKey(kind, value) {
+  return new Request(`https://aura-bae-map-cache.invalid/${kind}/${encodeURIComponent(value)}`);
+}
+
+async function publicMapCacheMatch(key) {
+  try { return await globalThis.caches?.default?.match(key); } catch { return null; }
+}
+
+function publicMapCachePut(ctx, key, response) {
+  try {
+    const promise = globalThis.caches?.default?.put(key, response.clone());
+    if (promise) ctx?.waitUntil?.(promise);
+  } catch {}
+}
+
+async function searchMapPlaces(request, env, ctx, url) {
   const user = await requireUser(request, env);
   if (user instanceof Response) return user;
   const query = cleanText(url.searchParams.get("q"), 120);
   if (query.length < 3) return json({ places: [] });
+  const cacheKey = publicMapCacheKey("search", query.toLocaleLowerCase("pt-BR"));
+  const cached = await publicMapCacheMatch(cacheKey);
+  if (cached) return cached;
   const endpoint = new URL("https://nominatim.openstreetmap.org/search");
   endpoint.searchParams.set("format", "jsonv2");
   endpoint.searchParams.set("limit", "6");
@@ -435,15 +454,20 @@ async function searchMapPlaces(request, env, url) {
     lat: Number(item.lat),
     lng: Number(item.lon)
   })).filter(item => item.name && isBarreirinhaPoint(item.lat, item.lng));
-  return json({ places });
+  const result = json({ places }, 200, { "cache-control": "public, max-age=86400" });
+  publicMapCachePut(ctx, cacheKey, result);
+  return result;
 }
 
-async function reverseMapPlace(request, env, url) {
+async function reverseMapPlace(request, env, ctx, url) {
   const user = await requireUser(request, env);
   if (user instanceof Response) return user;
   const lat = Number(url.searchParams.get("lat"));
   const lng = Number(url.searchParams.get("lng"));
   if (!isBarreirinhaPoint(lat, lng)) return json({ name: null });
+  const cacheKey = publicMapCacheKey("reverse", `${lat.toFixed(5)},${lng.toFixed(5)}`);
+  const cached = await publicMapCacheMatch(cacheKey);
+  if (cached) return cached;
   const endpoint = new URL("https://nominatim.openstreetmap.org/reverse");
   endpoint.searchParams.set("format", "jsonv2");
   endpoint.searchParams.set("zoom", "18");
@@ -458,9 +482,71 @@ async function reverseMapPlace(request, env, url) {
       }
     });
     const data = response.ok ? await response.json() : null;
-    return json({ name: data?.display_name ? cleanText(data.display_name, 220) : null });
+    const result = json({ name: data?.display_name ? cleanText(data.display_name, 220) : null }, 200, { "cache-control": "public, max-age=604800" });
+    publicMapCachePut(ctx, cacheKey, result);
+    return result;
   } catch {
     return json({ name: null });
+  }
+}
+
+function poiCategory(tags = {}) {
+  const amenity = String(tags.amenity || "");
+  const shop = String(tags.shop || "");
+  const tourism = String(tags.tourism || "");
+  if (/restaurant|cafe|fast_food|bar|pub|food_court|ice_cream/.test(amenity) || /bakery|beverages|convenience|deli/.test(shop)) return "food";
+  if (/pharmacy|hospital|clinic|doctors|dentist|veterinary/.test(amenity) || tags.healthcare) return "health";
+  if (/hotel|guest_house|hostel|motel|apartment/.test(tourism)) return "hotel";
+  if (shop || /marketplace|bank|atm/.test(amenity)) return "shopping";
+  if (/school|college|university|kindergarten|library/.test(amenity)) return "education";
+  return "service";
+}
+
+async function mapPointsOfInterest(request, env, ctx) {
+  const user = await requireUser(request, env);
+  if (user instanceof Response) return user;
+  const cacheKey = publicMapCacheKey("pois", "barreirinha-v1");
+  const cached = await publicMapCacheMatch(cacheKey);
+  if (cached) return cached;
+  const bbox = "-2.835,-57.115,-2.750,-57.015";
+  const query = `[out:json][timeout:18];(
+    nwr["name"]["shop"](${bbox});
+    nwr["name"]["amenity"~"restaurant|cafe|fast_food|bar|pub|food_court|ice_cream|pharmacy|hospital|clinic|doctors|dentist|veterinary|marketplace|bank|atm|school|college|university|kindergarten|library|fuel|post_office|police|townhall|community_centre"](${bbox});
+    nwr["name"]["tourism"~"hotel|guest_house|hostel|motel|apartment|attraction|museum"](${bbox});
+    nwr["name"]["leisure"~"sports_centre|stadium|park|fitness_centre"](${bbox});
+  );out center;`;
+  try {
+    const response = await fetch("https://overpass-api.de/api/interpreter", {
+      method: "POST",
+      headers: {
+        "accept": "application/json",
+        "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
+        "user-agent": "AuraBae/2.6 (kuadmff2@gmail.com)"
+      },
+      body: new URLSearchParams({ data: query }).toString()
+    });
+    if (!response.ok) throw new Error("overpass");
+    const data = await response.json().catch(() => ({}));
+    const unique = new Map();
+    for (const element of Array.isArray(data.elements) ? data.elements : []) {
+      const name = cleanText(element.tags?.name, 120);
+      const lat = Number(element.lat ?? element.center?.lat);
+      const lng = Number(element.lon ?? element.center?.lon);
+      if (!name || !isBarreirinhaPoint(lat, lng)) continue;
+      const key = `${name.toLocaleLowerCase("pt-BR")}:${lat.toFixed(5)}:${lng.toFixed(5)}`;
+      if (!unique.has(key)) unique.set(key, {
+        id: `${element.type || "poi"}-${element.id || key}`,
+        name,
+        category: poiCategory(element.tags),
+        lat,
+        lng
+      });
+    }
+    const result = json({ places: [...unique.values()].slice(0, 180) }, 200, { "cache-control": "public, max-age=21600" });
+    publicMapCachePut(ctx, cacheKey, result);
+    return result;
+  } catch {
+    return json({ places: [], warning: "Os pontos comerciais estão temporariamente indisponíveis." }, 200, { "cache-control": "public, max-age=300" });
   }
 }
 
@@ -780,9 +866,8 @@ async function cancelRide(request, env, rideId) {
   if (user instanceof Response) return user;
   const ride = await getRide(env, rideId);
   if (!ride || !canAccessRide(user, ride) || ["paid", "completed", "cancelled"].includes(ride.status)) return json({ error: "A corrida não pode ser cancelada." }, 409);
-  const fee = ["accepted", "in_progress", "arrived", "payment_pending"].includes(ride.status) ? Math.round(ride.fare_cents * 0.10) : 0;
-  await env.DB.prepare("UPDATE rides SET status = 'cancelled', cancel_fee_cents = ?, cancellation_reason = 'user_cancelled', last_activity_at = CURRENT_TIMESTAMP WHERE id = ?").bind(fee, rideId).run();
-  return json({ cancelled: true, cancellationFeeCents: fee });
+  await env.DB.prepare("UPDATE rides SET status = 'cancelled', cancel_fee_cents = 0, cancellation_reason = 'user_cancelled_no_fee', last_activity_at = CURRENT_TIMESTAMP WHERE id = ?").bind(rideId).run();
+  return json({ cancelled: true, cancellationFeeCents: 0 });
 }
 
 async function rateRide(request, env, rideId) {
