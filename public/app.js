@@ -6,7 +6,7 @@ const brl = value => {
   return Number.isFinite(amount) ? new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(amount) : "Calculando…";
 };
 const supportPhone = "5597991376123";
-const platformFee = 1.5;
+const platformFee = 1;
 
 const vehicles = {
   mototaxi: { name: "Mototáxi", code: "MT", minimum: 7, extraKm: 2 },
@@ -749,7 +749,8 @@ function fareValue() {
 function updatePrice() {
   const info = vehicles[selectedVehicle], fare = fareValue();
   const valid = Number.isFinite(fare);
-  $("#fare").textContent = $("#fare-line").textContent = valid ? brl(fare) : "Calculando…";
+  $("#fare").textContent = valid ? brl(fare + platformFee) : "Calculando…";
+  $("#fare-line").textContent = valid ? brl(fare) : "Calculando…";
   $("#total").textContent = valid ? brl(fare + platformFee) : "Calculando…";
   $("#driver-share").textContent = valid ? brl(fare * .9) : "—";
   $("#platform-share").textContent = valid ? brl(fare * .1) : "—";
@@ -838,7 +839,8 @@ function startPassengerPolling() {
 
 function applyServerPrice(ride) {
   const fare = ride.fareCents / 100;
-  $("#fare").textContent = $("#fare-line").textContent = brl(fare);
+  $("#fare").textContent = brl(ride.totalCents / 100);
+  $("#fare-line").textContent = brl(fare);
   $("#total").textContent = brl(ride.totalCents / 100);
   $("#driver-share").textContent = brl(ride.driverShareCents / 100);
   $("#platform-share").textContent = brl(ride.platformShareCents / 100);

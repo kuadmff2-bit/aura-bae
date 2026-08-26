@@ -74,7 +74,7 @@ async function routeApi(request, env, ctx, url) {
     return json({
       supportPhone: env.SUPPORT_PHONE,
       platformPercent: numberEnv(env.PLATFORM_PERCENT, 10),
-      fixedFee: numberEnv(env.PLATFORM_FIXED_FEE, 1.5),
+      fixedFee: numberEnv(env.PLATFORM_FIXED_FEE, 1),
       paymentsConfigured: Boolean(env.ASAAS_API_KEY),
       environment: env.ASAAS_ENVIRONMENT || "sandbox"
     });
@@ -947,7 +947,7 @@ function calculatePricing(vehicle, distanceKm, env) {
   if (!info || !Number.isFinite(Number(distanceKm)) || Number(distanceKm) <= 0) return null;
   const fare = Math.ceil((info.minimum + Math.max(0, distanceKm - 2) * info.extraKm) * 2) / 2;
   const fareCents = Math.round(fare * 100);
-  const fixedFeeCents = Math.round(numberEnv(env.PLATFORM_FIXED_FEE, 1.5) * 100);
+  const fixedFeeCents = Math.round(numberEnv(env.PLATFORM_FIXED_FEE, 1) * 100);
   const platformShareCents = Math.round(fareCents * numberEnv(env.PLATFORM_PERCENT, 10) / 100);
   return { fareCents, fixedFeeCents, totalCents: fareCents + fixedFeeCents, platformShareCents, driverShareCents: fareCents - platformShareCents };
 }

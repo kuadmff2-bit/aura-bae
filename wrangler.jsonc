@@ -16,7 +16,7 @@
     "ADMIN_NAME": "Carlos Olímpio",
     "ADMIN_PHONE": "97991376123",
     "PLATFORM_PERCENT": "10",
-    "PLATFORM_FIXED_FEE": "1.50",
+    "PLATFORM_FIXED_FEE": "1.00",
     "AUTOMATIC_PAYOUTS_ENABLED": "false"
   },
   "d1_databases": [

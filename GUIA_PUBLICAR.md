@@ -157,7 +157,7 @@ AUTOMATIC_PAYOUTS_ENABLED=true
 ```
 
 Se o pagamento for Pix, o motorista recebe um crédito de 90% da corrida no saldo
-interno. Se for dinheiro, a comissão de 10% e a taxa de R$ 1,50 ficam como débito e
+interno. Se for dinheiro, a comissão de 10% e a taxa de R$ 1,00 ficam como débito e
 são compensadas nos próximos repasses.
 
 ## Importante antes de abrir ao público

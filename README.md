@@ -21,7 +21,7 @@ e Asaas para criar cobranças Pix dinâmicas.
 - QR Code dinâmico e Pix Copia e Cola retornados pelo Asaas.
 - Confirmação somente pelo evento `PAYMENT_RECEIVED` do webhook.
 - Pagamento em dinheiro e registro do valor devido pela comissão.
-- Comissão de 10% sobre a corrida e taxa fixa de R$ 1,50.
+- Comissão de 10% sobre a corrida e taxa fixa de R$ 1,00.
 - Cancelamento automático de chamadas sem atualização por 5 minutos.
 - Livro-caixa interno para o saldo do motorista.
 - Rotina de repasse diário preparada, mas desligada por segurança até a homologação.
