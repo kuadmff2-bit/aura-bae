@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "aura-bae-api",
+  "name": "aura-bae",
   "main": "src/worker.js",
   "compatibility_date": "2026-08-25",
   "keep_vars": true,

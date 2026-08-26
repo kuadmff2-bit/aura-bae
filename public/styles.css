@@ -51,5 +51,249 @@ html[data-theme=dark] .success-message{background:#0b2c20!important;color:#6de0a
 html[data-theme=dark] .photo-picker-control{background:linear-gradient(135deg,#0b1b15,#07100c)}html[data-theme=dark] .photo-picker-action{background:#101d18}
 @media(max-width:620px){.photo-picker-control{grid-template-columns:54px minmax(0,1fr);min-height:82px}.photo-picker-action{grid-column:2;justify-self:start;padding:0;background:transparent!important}.photo-crop-modal{align-items:end;padding:0}.photo-crop-dialog{width:100%;max-height:94svh;padding:17px;border-radius:26px 26px 0 0}.photo-crop-dialog>header h2{font-size:21px}.photo-crop-stage.portrait{width:min(100%,72svh)}.photo-crop-actions{grid-template-columns:1fr}.photo-crop-actions .secondary{order:2}.photo-crop-dialog>p{font-size:10px}}
 
+/* Aura Bae 2.4: acessos separados, mapa ampliado e carteira do motorista */
+.login-role-choice{margin-bottom:3px}.login-role-choice button{min-height:78px}.login-role-choice b{font-size:12px}.map-open-button{width:100%;min-height:66px;margin-top:15px;display:grid;grid-template-columns:42px minmax(0,1fr) auto;align-items:center;gap:11px;padding:10px 13px;border:1px solid color-mix(in srgb,var(--green) 38%,var(--line));border-radius:16px;background:var(--soft);color:var(--ink);text-align:left}.map-open-button>span{width:42px;height:42px;display:grid;place-items:center;border-radius:13px;background:var(--green);color:white;font-size:22px;font-weight:900}.map-open-button>div{min-width:0;display:grid}.map-open-button strong{font-size:14px}.map-open-button small{color:var(--muted);font-size:9px}.map-open-button>i{color:var(--green);font-size:25px;font-style:normal}.map-open-button:disabled{opacity:.48;cursor:not-allowed}.map-picker-header,.map-search-panel,.map-picker-footer{display:none}.map-picker-open{overflow:hidden}.city-map-shell.expanded{position:fixed;inset:0;z-index:2400;width:100vw;height:100svh!important;margin:0;display:grid;grid-template-rows:auto auto minmax(0,1fr) auto;border:0;border-radius:0;background:var(--paper)}.city-map-shell.expanded .map-picker-header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px max(16px,env(safe-area-inset-left));border-bottom:1px solid var(--line);background:var(--paper);z-index:1001}.map-picker-header>div{display:grid}.map-picker-header small{color:var(--green);font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.11em}.map-picker-header strong{font-size:20px}.map-picker-header button{width:44px;height:44px;border:1px solid var(--line);border-radius:13px;background:var(--soft);color:var(--ink);font-size:28px}.city-map-shell.expanded .map-search-panel{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:11px max(16px,env(safe-area-inset-left));border-bottom:1px solid var(--line);background:var(--paper);z-index:1001}.map-search-panel>label{position:relative;display:grid;grid-template-columns:32px minmax(0,1fr);align-items:center;gap:8px;padding:7px 10px;border:1px solid var(--line);border-radius:14px;background:var(--cream)}.map-search-panel>label>i{width:30px;height:30px;display:grid;place-items:center;border-radius:50%;background:var(--green);color:white;font-size:9px;font-style:normal;font-weight:950}.map-search-panel>label:nth-child(2)>i{background:var(--yellow);color:#17342c}.map-search-panel>label>span{display:grid}.map-search-panel small{color:var(--muted);font-size:8px;text-transform:uppercase;letter-spacing:.08em}.map-search-panel input{min-height:30px;padding:0;border:0;border-radius:0;background:transparent;font-size:13px;outline:0}.map-search-results{position:absolute;z-index:1600;left:0;right:0;top:calc(100% + 7px);max-height:260px;overflow:auto;padding:6px;border:1px solid var(--line);border-radius:14px;background:var(--paper);box-shadow:0 16px 45px rgba(0,0,0,.22)}.map-search-results button{width:100%;display:grid;gap:2px;padding:10px;border:0;border-bottom:1px solid var(--line);background:transparent;color:var(--ink);text-align:left}.map-search-results button:last-child{border-bottom:0}.map-search-results button:hover{border-radius:9px;background:var(--soft)}.map-search-results strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px}.map-search-results small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-transform:none;letter-spacing:0}.map-search-results p{margin:0;padding:10px;color:var(--muted);font-size:10px}.city-map-shell.expanded .city-map{width:100%;height:100%;min-height:0}.city-map-shell.expanded .map-chip{top:154px;left:18px}.city-map-shell.expanded .map-message{bottom:86px;left:18px;right:18px}.city-map-shell.expanded .map-picker-footer{min-height:76px;display:grid;grid-template-columns:1fr 1.7fr;align-items:center;gap:10px;margin:0;padding:10px max(16px,env(safe-area-inset-right)) max(10px,env(safe-area-inset-bottom));border-top:1px solid var(--line);background:var(--paper);color:var(--ink);z-index:1001}.map-picker-footer .primary,.map-picker-footer .secondary{min-height:53px;margin:0}.leaflet-marker-draggable{cursor:grab}.leaflet-marker-draggable:active{cursor:grabbing}
+
+.cash-credit-check{width:100%;display:grid;grid-template-columns:auto 1fr 1fr;align-items:center;gap:9px;margin-top:13px;padding:11px;border:1px solid var(--line);border-radius:14px;text-align:left}.cash-credit-check>span{width:48px;height:38px;display:grid;place-items:center;border-radius:10px;background:var(--green);color:white;font-size:9px;font-weight:950}.cash-credit-check>div{display:grid}.cash-credit-check small{color:var(--muted);font-size:8px}.cash-credit-check strong{font-size:11px}.cash-credit-check.low{border-color:color-mix(in srgb,var(--red) 50%,var(--line));background:color-mix(in srgb,var(--red) 8%,var(--paper))}.cash-credit-check.low>span{background:var(--red)}.incoming>#open-wallet-from-ride{width:100%}.wallet-grid{display:grid;grid-template-columns:minmax(260px,.7fr) minmax(320px,1fr);gap:16px;align-items:start}.wallet-grid>.card{padding:23px}.wallet-balance-card{position:sticky;top:105px;background:linear-gradient(145deg,var(--green),var(--dark));color:white}.wallet-balance-card>small{color:rgba(255,255,255,.72);font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.1em}.wallet-balance-card>strong{display:block;margin:12px 0 7px;font-size:48px;letter-spacing:-.06em}.wallet-balance-card>p{margin:0;color:rgba(255,255,255,.78);font-size:11px;line-height:1.6}.wallet-topup-card h2{margin:4px 0 15px}.wallet-presets{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}.wallet-presets button{min-height:45px;border:1px solid var(--line);border-radius:12px;background:var(--cream);color:var(--ink);font-size:11px;font-weight:900}.wallet-presets button.active{border-color:var(--green);background:var(--soft);color:var(--green)}.wallet-topup-card label{margin-top:12px}.wallet-history-card{grid-column:2}.wallet-history{display:grid}.wallet-history>div{min-height:64px;display:grid;grid-template-columns:38px minmax(0,1fr) auto;align-items:center;gap:10px;border-bottom:1px solid var(--line)}.wallet-history>div:last-child{border-bottom:0}.wallet-entry-icon{width:34px;height:34px;display:grid;place-items:center;border-radius:11px;background:var(--soft);font-weight:950}.wallet-history p{min-width:0;display:grid;margin:0}.wallet-history p strong{font-size:11px}.wallet-history p small{color:var(--muted);font-size:8px}.wallet-history>div>b{font-size:10px}.wallet-history .positive{color:var(--green)}.wallet-history .negative{color:var(--red)}.wallet-pix{margin-top:18px;padding-top:18px;border-top:1px solid var(--line);display:grid;text-align:center}.wallet-pix>span{width:48px;height:48px;margin:auto;display:grid;place-items:center;border-radius:14px;background:var(--green);color:white;font-weight:950}.wallet-pix h3{margin:9px 0 2px;font-size:27px}.wallet-pix p{margin:0 auto 12px;max-width:440px;color:var(--muted);font-size:10px}.wallet-pix img{width:min(230px,100%);margin:auto;border:10px solid white;border-radius:15px}.wallet-pix textarea{min-height:86px;margin-top:12px;font-size:9px}.wallet-pix small{margin-top:9px;color:var(--green);font-size:9px;font-weight:850}.recovery-share{margin:12px 0 16px;padding:14px;border:1px solid color-mix(in srgb,var(--green) 40%,var(--line));border-radius:15px;background:var(--soft)}.recovery-share>small{color:var(--green);font-size:8px;font-weight:900;text-transform:uppercase}.recovery-share>strong{display:block;margin-top:3px}.recovery-share>p{margin:3px 0 10px;color:var(--muted);font-size:9px}.recovery-share>div{display:grid;grid-template-columns:1.5fr 1fr;gap:7px}.recovery-share .primary,.recovery-share .secondary{min-height:44px;margin:0}.support-card .link-button{margin-top:18px}.support-card #support-fallback{margin-top:9px;text-align:center}
+
+@media(max-width:760px){.city-map-shell.expanded .map-search-panel{grid-template-columns:1fr}.city-map-shell.expanded .map-chip{top:218px}.wallet-grid{grid-template-columns:1fr}.wallet-balance-card{position:static}.wallet-history-card{grid-column:1}.wallet-presets{grid-template-columns:1fr 1fr}}
+@media(max-width:620px){.login-role-choice button{min-height:72px}.map-open-button{min-height:70px}.city-map-shell.expanded .map-picker-header{padding:10px 13px}.city-map-shell.expanded .map-search-panel{padding:9px 13px}.map-search-panel>label{padding:5px 8px}.city-map-shell.expanded .map-picker-footer{grid-template-columns:1fr 1.6fr;padding-inline:12px}.city-map-shell.expanded .map-chip{top:206px;left:12px}.city-map-shell.expanded .map-message{bottom:82px;left:12px;right:12px}.wallet-grid>.card{padding:18px}.wallet-balance-card>strong{font-size:42px}.cash-credit-check{grid-template-columns:auto 1fr}.cash-credit-check>div:last-child{grid-column:2}.recovery-share>div{grid-template-columns:1fr}}
+
 /* Ações recolhíveis da conta e foto no cabeçalho */
 .user-badge{overflow:hidden;padding:0}.user-badge img{width:100%;height:100%;border-radius:50%;object-fit:cover}.settings-actions{display:grid;gap:9px;margin-top:17px}.settings-button{min-height:70px;display:grid;grid-template-columns:1fr auto;align-items:center;padding:12px 15px;border:1px solid var(--line);border-radius:15px;background:var(--soft);color:var(--ink);text-align:left}.settings-button span{grid-column:1;color:var(--muted);font-size:9px;font-weight:850;text-transform:uppercase;letter-spacing:.08em}.settings-button strong{grid-column:1;font-size:14px}.settings-button i{grid-column:2;grid-row:1/3;color:var(--green);font-size:27px;font-style:normal}.settings-panel{margin-top:14px;padding-top:16px;border-top:1px solid var(--line)}.settings-panel-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}.settings-panel-heading small{color:var(--green);font-size:9px;font-weight:900;text-transform:uppercase}.settings-panel-heading h3{margin:2px 0 0;font-size:20px}.settings-close{width:40px;height:40px;border:1px solid var(--line);border-radius:12px;background:var(--soft);color:var(--ink);font-size:23px}.account-settings{overflow:hidden}
+
+/* Aura Bae 2.5 — visual noturno, urbano e confortável no celular */
+.split{display:none!important}
+html[data-theme=dark]{
+  color-scheme:dark;
+  --ink:#f2faf6;
+  --muted:#8fa39a;
+  --green:#20d394;
+  --dark:#020806;
+  --soft:#0b1b15;
+  --cream:#020705;
+  --paper:#07100c;
+  --yellow:#f2b943;
+  --line:#173329;
+  --red:#ff756d
+}
+html[data-theme=dark] body{
+  min-height:100svh;
+  background:
+    radial-gradient(circle at 12% -8%,rgba(32,211,148,.14),transparent 34%),
+    radial-gradient(circle at 92% 18%,rgba(18,92,68,.12),transparent 27%),
+    linear-gradient(180deg,#020705 0%,#030a07 52%,#010403 100%);
+  color:var(--ink)
+}
+html[data-theme=dark] .auth-page{
+  background:
+    radial-gradient(circle at 15% 18%,rgba(32,211,148,.16),transparent 30%),
+    radial-gradient(circle at 85% 78%,rgba(14,91,65,.12),transparent 32%),
+    #020705
+}
+html[data-theme=dark] .app-header{
+  background:rgba(2,8,6,.91);
+  border-bottom-color:rgba(80,198,155,.18);
+  box-shadow:0 15px 45px rgba(0,0,0,.38);
+  backdrop-filter:blur(20px) saturate(135%)
+}
+html[data-theme=dark] .logo{
+  background:linear-gradient(145deg,#24df9d,#0b7655);
+  box-shadow:0 10px 28px rgba(32,211,148,.22),inset -5px -5px rgba(0,0,0,.12)
+}
+html[data-theme=dark] .brand small{color:#7f978d}
+html[data-theme=dark] .role-nav,
+html[data-theme=dark] .auth-tabs{
+  background:#06100c;
+  border:1px solid #142b23;
+  box-shadow:inset 0 1px rgba(255,255,255,.025)
+}
+html[data-theme=dark] .role-nav button,
+html[data-theme=dark] .auth-tabs button{color:#82978e}
+html[data-theme=dark] .role-nav button.active,
+html[data-theme=dark] .auth-tabs button.active{
+  background:linear-gradient(135deg,#1cc98c,#0c7253);
+  color:#fff;
+  box-shadow:0 8px 24px rgba(32,211,148,.18)
+}
+html[data-theme=dark] .theme-toggle,
+html[data-theme=dark] .logout,
+html[data-theme=dark] .user-badge{
+  background:#07110d;
+  border-color:#19342a;
+  color:var(--ink)
+}
+html[data-theme=dark] .workspace,
+html[data-theme=dark] .admin-wrap{position:relative}
+html[data-theme=dark] .heading>span,
+html[data-theme=dark] .heading>div>span,
+html[data-theme=dark] .green-label,
+html[data-theme=dark] .card-title small{color:#45e3aa}
+html[data-theme=dark] .heading h1{color:#f7fcf9;text-shadow:0 7px 30px rgba(0,0,0,.35)}
+html[data-theme=dark] .card,
+html[data-theme=dark] .auth-card,
+html[data-theme=dark] .stats article,
+html[data-theme=dark] .admin-stats article,
+html[data-theme=dark] .empty{
+  background:linear-gradient(155deg,rgba(10,23,18,.98),rgba(4,12,8,.98));
+  border-color:#17352a;
+  box-shadow:0 20px 55px rgba(0,0,0,.3),inset 0 1px rgba(255,255,255,.025)
+}
+html[data-theme=dark] input,
+html[data-theme=dark] select,
+html[data-theme=dark] textarea,
+html[data-theme=dark] .profile-grid input,
+html[data-theme=dark] .profile-grid select{
+  background:#030a07;
+  border-color:#17362b;
+  color:#f3faf7
+}
+html[data-theme=dark] input::placeholder,
+html[data-theme=dark] textarea::placeholder{color:#61766d}
+html[data-theme=dark] input:focus,
+html[data-theme=dark] select:focus,
+html[data-theme=dark] textarea:focus{
+  border-color:#24d596;
+  outline-color:rgba(32,211,148,.15)
+}
+html[data-theme=dark] .vehicle-grid button{
+  background:linear-gradient(145deg,#08140f,#050c09);
+  border-color:#18382c;
+  color:var(--ink);
+  box-shadow:inset 0 1px rgba(255,255,255,.025)
+}
+html[data-theme=dark] .vehicle-grid button:hover{border-color:#286a51;transform:translateY(-1px)}
+html[data-theme=dark] .vehicle-grid button.active{
+  background:linear-gradient(145deg,rgba(27,190,132,.24),rgba(8,33,24,.95));
+  border-color:#28d99c;
+  box-shadow:0 0 0 1px rgba(40,217,156,.14),0 12px 32px rgba(0,0,0,.25)
+}
+html[data-theme=dark] .vehicle-grid button.active>span{
+  background:#22d598;
+  color:#022116;
+  box-shadow:0 0 0 6px rgba(32,211,148,.09)
+}
+html[data-theme=dark] .vehicle-grid button i{color:#6fe2b7}
+html[data-theme=dark] .route-card,
+html[data-theme=dark] .summary{
+  background:linear-gradient(155deg,#091712,#040b08);
+  border-color:#1b3c30
+}
+html[data-theme=dark] .map-open-button,
+html[data-theme=dark] .map-toolbar button,
+html[data-theme=dark] .point-summary>div,
+html[data-theme=dark] .payment-choice select{
+  background:#050d0a;
+  border-color:#19372c;
+  color:var(--ink)
+}
+html[data-theme=dark] .map-open-button{
+  box-shadow:inset 0 1px rgba(255,255,255,.025),0 10px 24px rgba(0,0,0,.18)
+}
+html[data-theme=dark] .map-open-button>span,
+html[data-theme=dark] .point-summary>div>i,
+html[data-theme=dark] .nearby-driver-icon,
+html[data-theme=dark] .transport-title>span{
+  background:linear-gradient(145deg,#25d99b,#0a7655);
+  box-shadow:0 8px 20px rgba(32,211,148,.18)
+}
+html[data-theme=dark] .map-toolbar button.active{
+  background:#19b77f;
+  border-color:#27daa0;
+  color:#fff
+}
+html[data-theme=dark] .city-map-shell,
+html[data-theme=dark] .admin-map-shell{
+  background:#030806;
+  border-color:#236b51;
+  box-shadow:0 24px 65px rgba(0,0,0,.46),0 0 0 1px rgba(32,211,148,.06)
+}
+html[data-theme=dark] .leaflet-tile-pane{filter:saturate(.68) contrast(1.08) brightness(.94)}
+html[data-theme=dark] .map-chip,
+html[data-theme=dark] .operations-legend{
+  background:rgba(2,10,7,.9);
+  border-color:rgba(75,224,169,.24);
+  color:#7be9be;
+  box-shadow:0 12px 32px rgba(0,0,0,.38)
+}
+html[data-theme=dark] .map-message{
+  background:rgba(5,17,12,.94);
+  border:1px solid #1c4c3a;
+  color:#74e3b7
+}
+html[data-theme=dark] .nearby-driver,
+html[data-theme=dark] .route-result,
+html[data-theme=dark] .status-panel,
+html[data-theme=dark] .assigned-driver-card{
+  background:linear-gradient(145deg,#091813,#050c09);
+  border-color:#1c3d31
+}
+html[data-theme=dark] .nearby-driver.ready,
+html[data-theme=dark] .route-result{background:linear-gradient(145deg,rgba(24,154,108,.2),#06100c)}
+html[data-theme=dark] .summary{overflow:hidden}
+html[data-theme=dark] .summary:before{
+  content:"";
+  display:block;
+  height:3px;
+  margin:-23px -23px 20px;
+  background:linear-gradient(90deg,#1dd092,transparent 78%)
+}
+html[data-theme=dark] .price strong{color:#f5fff9;text-shadow:0 8px 28px rgba(32,211,148,.12)}
+html[data-theme=dark] .lines{border-color:#17352a}
+html[data-theme=dark] .lines .total{border-color:#27533f;color:#fff}
+html[data-theme=dark] .primary{
+  background:linear-gradient(135deg,#22d598,#0b7655);
+  color:#fff;
+  box-shadow:0 13px 30px rgba(20,182,125,.2)
+}
+html[data-theme=dark] .primary:not(:disabled):hover{filter:brightness(1.08);transform:translateY(-1px)}
+html[data-theme=dark] .primary:disabled{background:#17251f;color:#71827a;box-shadow:none}
+html[data-theme=dark] .secondary{
+  background:#0a1712;
+  border:1px solid #1a3b2f;
+  color:#72ddb3
+}
+html[data-theme=dark] .success-box,
+html[data-theme=dark] .rating-box,
+html[data-theme=dark] .payment-pending,
+html[data-theme=dark] .paid-notice{
+  background:#071610;
+  border-color:#20503d
+}
+html[data-theme=dark] .success-box{box-shadow:inset 0 0 45px rgba(32,211,148,.05)}
+html[data-theme=dark] .operations-card{background:linear-gradient(155deg,#08140f,#030906)}
+html[data-theme=dark] .operations-sidebar{background:#030906;border-color:#17382c}
+html[data-theme=dark] .operations-live{background:#071a13;border-color:#1d4d3a}
+html[data-theme=dark] .operation-ride:hover{background:#0a1d15}
+html[data-theme=dark] .wallet-balance-card{background:linear-gradient(145deg,#129b6c,#063d2d)}
+html[data-theme=dark] footer{background:#03100b;border-color:#17352a;color:#b8cac2}
+
+@media(max-width:760px){
+  html[data-theme=dark] .app-header{padding:10px 12px 8px}
+  html[data-theme=dark] .role-nav{width:100%;padding:4px;border-radius:15px}
+  html[data-theme=dark] .workspace,
+  html[data-theme=dark] .admin-wrap{width:min(100% - 20px,1200px);padding-top:22px}
+  html[data-theme=dark] .heading{margin-bottom:18px}
+  html[data-theme=dark] .heading h1{font-size:34px}
+  html[data-theme=dark] .card{border-radius:21px}
+  html[data-theme=dark] .vehicle-card{padding:15px}
+  html[data-theme=dark] .vehicle-grid{gap:8px}
+  html[data-theme=dark] .vehicle-grid button{min-height:76px;padding:10px}
+  html[data-theme=dark] .city-map-shell{height:430px;border-radius:22px}
+  html[data-theme=dark] .summary{position:static}
+  html[data-theme=dark] .price{padding-block:20px}
+  html[data-theme=dark] .price strong{font-size:48px}
+  html[data-theme=dark] .operations-card{padding:13px}
+}
+
+@media(max-width:620px){
+  html[data-theme=dark] body{font-size:16px}
+  html[data-theme=dark] .brand strong{font-size:20px}
+  html[data-theme=dark] .role-nav button{min-height:47px;font-size:12px}
+  html[data-theme=dark] .route-card{padding:16px}
+  html[data-theme=dark] .map-open-button{min-height:74px}
+  html[data-theme=dark] .point-summary>div{min-height:62px}
+  html[data-theme=dark] .nearby-driver{padding:14px}
+  html[data-theme=dark] .primary,
+  html[data-theme=dark] .secondary{min-height:56px}
+}

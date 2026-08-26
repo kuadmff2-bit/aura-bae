@@ -11,6 +11,24 @@ Você precisará de:
 
 Não envie as chaves para outra pessoa e não coloque nenhuma delas no GitHub.
 
+## Se você já tem o Aura Bae publicado
+
+Esta é a opção certa para a instalação que já está funcionando:
+
+1. Faça uma cópia de segurança do repositório atual.
+2. Substitua os arquivos do GitHub pelos arquivos desta nova versão, mantendo a
+   mesma estrutura de pastas.
+3. Não apague o banco D1 nem os segredos que já estão cadastrados no Cloudflare.
+4. Confirme que o projeto continua ligado ao banco `aura-bae-db` com o nome de
+   binding `DB`.
+5. No Cloudflare, abra **Deployments** e acompanhe a nova implantação. Se ela não
+   começar automaticamente, use **Retry build**.
+6. O comando `npm run deploy` executará a nova migração da carteira antes de
+   publicar o site.
+
+Como o nome do Worker continua sendo `aura-bae`, o endereço do webhook do Asaas
+permanece o mesmo. Não crie outro Worker e não troque a URL do webhook.
+
 ## 1. Envie o projeto para o GitHub
 
 Crie um repositório privado chamado `aura-bae` e envie o conteúdo desta pasta. O
@@ -94,6 +112,7 @@ Use:
 Eventos necessários:
 
 - `PAYMENT_RECEIVED`;
+- `PAYMENT_CONFIRMED`;
 - `PAYMENT_REFUNDED`;
 - `PAYMENT_PARTIALLY_REFUNDED`.
 
@@ -113,7 +132,7 @@ mostra os acessos que você pode enviar aos seus amigos:
 Cada vez que você tocar no botão, a senha volta para o valor acima e as sessões
 antigas dessas contas são encerradas.
 
-1. Crie uma conta e, no perfil, ative o modo motorista com CPF, veículo, fotos e chave Pix.
+1. Entre como passageiro para pedir corridas ou como motorista para trabalhar. Uma conta de passageiro também pode ativar o perfil de motorista com CPF, veículo, fotos e chave Pix.
 2. A ativação é automática; permita a localização e toque em **Ficar disponível**.
 3. Confira no mapa administrativo se o motorista aparece online.
 4. Em outro aparelho, cadastre um passageiro e solicite a corrida.
@@ -121,6 +140,18 @@ antigas dessas contas são encerradas.
 6. Acompanhe a rota e a situação da corrida na Central de Operações.
 7. Nesse momento o QR Code Pix é criado.
 8. Após o webhook confirmar o recebimento, o passageiro avalia a corrida.
+
+## Corridas em dinheiro e carteira do motorista
+
+1. O motorista abre **Carteira** e adiciona crédito por Pix.
+2. O Asaas confirma a recarga e o saldo aparece automaticamente.
+3. Antes de aceitar uma corrida em dinheiro, o aplicativo confere se existe saldo
+   suficiente para cobrir 10% da corrida mais R$ 1,00.
+4. No destino, o passageiro entrega o valor total em dinheiro diretamente ao motorista.
+5. Depois da confirmação do recebimento, somente a comissão e a taxa fixa são
+   descontadas da carteira. O restante já está com o motorista.
+
+Corridas pagas por Pix não consomem o saldo dessa carteira.
 
 Chamadas em busca ou aceitas que fiquem 5 minutos sem atualização são canceladas
 automaticamente. Corridas em andamento ou aguardando pagamento nunca são canceladas
@@ -157,8 +188,8 @@ AUTOMATIC_PAYOUTS_ENABLED=true
 ```
 
 Se o pagamento for Pix, o motorista recebe um crédito de 90% da corrida no saldo
-interno. Se for dinheiro, a comissão de 10% e a taxa de R$ 1,00 ficam como débito e
-são compensadas nos próximos repasses.
+de repasses. Se for dinheiro, a comissão de 10% e a taxa de R$ 1,00 são descontadas
+imediatamente da carteira pré-paga do motorista.
 
 ## Importante antes de abrir ao público
 

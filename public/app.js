@@ -7,6 +7,9 @@ const brl = value => {
 };
 const supportPhone = "5597991376123";
 const platformFee = 1;
+const themeStorageKey = "aura-theme-v2.5";
+const mapHome = [-2.79333, -57.07];
+const mapHomeZoom = 15;
 
 const vehicles = {
   mototaxi: { name: "Mototáxi", code: "MT", minimum: 7, extraKm: 2 },
@@ -19,14 +22,20 @@ let liveDrivers = [];
 let currentUser = null;
 let currentMode = "passenger";
 let authMode = "login";
+let loginRole = "passenger";
 let registerRole = "passenger";
-let selectedVehicle = "motocarro";
+let selectedVehicle = "mototaxi";
 let passengerStep = "idle";
 let passengerTimer;
 let driverOnline = false;
 let driverStep = "waiting";
 let driverTimer;
 let cityMap = null;
+let cityBaseLayer = null;
+let adminBaseLayer = null;
+let mapPickerSnapshot = null;
+let mapSearchTimer = null;
+let mapSearchController = null;
 let originPoint = null;
 let destinationPoint = null;
 let pickMode = "origin";
@@ -57,6 +66,8 @@ let adminPoller = null;
 let adminMapHasFitted = false;
 let adminRefreshRunning = false;
 const adminRouteCache = new Map();
+let walletPoller = null;
+let currentWalletBalanceCents = 0;
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -77,7 +88,11 @@ async function api(path, options = {}) {
 function initials(name) { return name.split(" ").map(part => part[0]).slice(0, 2).join("").toUpperCase(); }
 function escapeHtml(value) { return String(value ?? "").replace(/[&<>'"]/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]); }
 function phoneText(phone) { return `(${phone.slice(0,2)}) ${phone.slice(2,7)}-${phone.slice(7)}`; }
-function pointText(point) { return point ? `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}` : "Toque no mapa para marcar"; }
+function pointText(point) { return point ? point.label || `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}` : "Toque no mapa para marcar"; }
+function shortPlaceName(name) {
+  const parts = String(name || "").split(",").map(part => part.trim()).filter(Boolean);
+  return parts.slice(0, 2).join(", ") || "Local marcado";
+}
 function cpfText(cpf) { const value = digits(cpf || "", 11); return value.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4"); }
 function setMessage(element, message, success = false) { element.textContent = message; element.classList.remove("hidden"); element.classList.toggle("success-message", success); }
 
@@ -319,12 +334,14 @@ function driverEta(distanceKm) { return Math.max(2, Math.ceil(distanceKm * 4)); 
 
 function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
-  localStorage.setItem("aura-theme", theme);
+  localStorage.setItem(themeStorageKey, theme);
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", theme === "dark" ? "#020806" : "#eef4f0");
   $$('[data-theme-toggle]').forEach(button => button.innerHTML = theme === "light" ? "☾ <span>Escuro</span>" : "☀ <span>Claro</span>");
+  updateMapBaseLayers();
 }
 
 $$('[data-theme-toggle]').forEach(button => button.addEventListener("click", () => applyTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light")));
-applyTheme(localStorage.getItem("aura-theme") || "dark");
+applyTheme(localStorage.getItem(themeStorageKey) || "dark");
 
 $("#toggle-password").addEventListener("click", () => {
   const input = $("#auth-password");
@@ -348,15 +365,22 @@ $$('[data-password-target]').forEach(button => button.addEventListener("click", 
 function setAuthMode(mode) {
   authMode = mode;
   $$('[data-auth-mode]').forEach(button => button.classList.toggle("active", button.dataset.authMode === mode));
+  $("#login-role-choice").classList.toggle("hidden", mode !== "login");
   $("#register-fields").classList.toggle("hidden", mode !== "register");
   $("#driver-register-fields").classList.toggle("hidden", mode !== "register" || registerRole !== "driver");
   $("#auth-kicker").textContent = mode === "login" ? "Bem-vindo de volta" : "Cadastro rápido";
-  $("#auth-heading").textContent = mode === "login" ? "Entre na Aura Bae" : "Como você usará o aplicativo?";
-  $("#auth-submit").textContent = mode === "login" ? "Entrar no sistema" : registerRole === "driver" ? "Criar conta e começar" : "Criar minha conta";
+  $("#auth-heading").textContent = mode === "login" ? (loginRole === "driver" ? "Entre para trabalhar" : "Entre na Aura Bae") : "Como você usará o aplicativo?";
+  $("#auth-submit").textContent = mode === "login" ? (loginRole === "driver" ? "Entrar como motorista" : "Entrar como passageiro") : registerRole === "driver" ? "Criar conta e começar" : "Criar minha conta";
   $("#auth-error").classList.add("hidden");
 }
 
 $$('[data-auth-mode]').forEach(button => button.addEventListener("click", () => setAuthMode(button.dataset.authMode)));
+$$('[data-login-role]').forEach(button => button.addEventListener("click", () => {
+  loginRole = button.dataset.loginRole;
+  $$('[data-login-role]').forEach(item => item.classList.toggle("active", item.dataset.loginRole === loginRole));
+  $("#auth-heading").textContent = loginRole === "driver" ? "Entre para trabalhar" : "Entre na Aura Bae";
+  $("#auth-submit").textContent = loginRole === "driver" ? "Entrar como motorista" : "Entrar como passageiro";
+}));
 $$('[data-register-role]').forEach(button => button.addEventListener("click", () => {
   registerRole = button.dataset.registerRole;
   $$('[data-register-role]').forEach(item => item.classList.toggle("active", item.dataset.registerRole === registerRole));
@@ -384,7 +408,7 @@ $("#auth-form").addEventListener("submit", async event => {
     const profilePhoto = authMode === "register" && registerRole === "driver" ? await selectedPhotoData("auth-profile-photo") : undefined;
     const vehiclePhoto = authMode === "register" && registerRole === "driver" ? await selectedPhotoData("auth-vehicle-photo") : undefined;
     const result = authMode === "login"
-      ? await api("/api/auth/login", { method: "POST", body: { phone, password } })
+      ? await api("/api/auth/login", { method: "POST", body: { phone, password, mode: loginRole } })
       : await api("/api/auth/register", {
           method: "POST",
           body: {
@@ -401,7 +425,7 @@ $("#auth-form").addEventListener("submit", async event => {
             vehiclePhoto
           }
         });
-    enterApp(result.user);
+    enterApp(result.user, result.loginMode || (authMode === "login" ? loginRole : registerRole));
   } catch (error) {
     showAuthError(error.message);
     if (error.data?.field) document.getElementById(error.data.field)?.focus();
@@ -473,18 +497,20 @@ $("#setup-form").addEventListener("submit", async event => {
   }
 });
 
-function enterApp(user) {
+function enterApp(user, requestedMode = null) {
   currentUser = user;
   currentUser.vehicle = user.vehicleType;
   currentUser.vehicleId = user.vehicleModel;
   currentUser.driverStatus = user.driverStatus;
-  currentMode = user.role === "admin" ? "admin" : "passenger";
+  const savedMode = requestedMode || localStorage.getItem("aura-entry-mode") || "passenger";
+  currentMode = user.role === "admin" ? "admin" : savedMode === "driver" && user.canDrive ? "driver" : "passenger";
+  if (user.role !== "admin") localStorage.setItem("aura-entry-mode", currentMode);
   $("#auth-page").classList.add("hidden");
   $("#app-shell").classList.remove("hidden");
   renderUserBadge();
   renderNav();
-  showView(user.role === "admin" ? "admin" : "passenger");
-  if (user.role !== "admin") {
+  showView(currentMode);
+  if (user.role !== "admin" && currentMode === "passenger") {
     $("#passenger-greeting").textContent = `Olá, ${user.name.split(" ")[0]}`;
     initializeMap();
     resumePassengerRide();
@@ -503,21 +529,29 @@ function renderUserBadge() {
 }
 
 function renderNav() {
-  const links = currentUser.role === "admin" ? [["admin", "Visão geral"], ["profile", "Perfil"], ["support", "Suporte"]] : [["passenger", "Corrida"], ...(currentUser.canDrive ? [["driver", "Trabalho"]] : []), ["profile", "Perfil"], ["support", "Suporte"]];
+  const links = currentUser.role === "admin"
+    ? [["admin", "Visão geral"], ["profile", "Perfil"], ["support", "Suporte"]]
+    : currentMode === "driver"
+      ? [["driver", "Trabalho"], ["wallet", "Carteira"], ["profile", "Perfil"], ["support", "Suporte"]]
+      : [["passenger", "Corrida"], ["profile", "Perfil"], ["support", "Suporte"]];
   $("#main-nav").innerHTML = links.map(([id, label]) => `<button data-view="${id}">${label}</button>`).join("");
   $$('#main-nav [data-view]').forEach(button => button.onclick = () => showView(button.dataset.view));
 }
 
 function showView(id) {
+  const permitted = currentUser?.role === "admin" ? ["admin", "profile", "support"]
+    : currentMode === "driver" ? ["driver", "wallet", "profile", "support"] : ["passenger", "profile", "support"];
+  if (!permitted.includes(id)) id = permitted[0];
   $$('.view').forEach(view => view.classList.toggle("active", view.id === id));
   $$('#main-nav [data-view]').forEach(button => button.classList.toggle("active", button.dataset.view === id));
   window.scrollTo({ top: 0, behavior: "smooth" });
   if (id === "passenger") setTimeout(() => cityMap?.invalidateSize(), 80);
-  if (id === "passenger") currentMode = "passenger";
   if (id === "driver") {
-    currentMode = "driver"; renderDriverProfile(); resumeDriverRide();
+    renderDriverProfile(); resumeDriverRide();
     if (!currentUser.tutorialSeen?.driver) setTimeout(() => showTutorial("driver"), 250);
   }
+  if (id === "wallet") renderWallet();
+  else if (walletPoller) { clearInterval(walletPoller); walletPoller = null; }
   if (id === "profile") renderProfile();
   if (id === "admin") startAdminMonitoring();
   else clearInterval(adminPoller);
@@ -529,18 +563,39 @@ $("#user-badge").onclick = () => showView("profile");
 $("#logout").addEventListener("click", async () => {
   clearInterval(ridePoller); clearInterval(driverPoller);
   clearInterval(locationPoller); clearInterval(adminPoller);
+  clearInterval(walletPoller);
   try { await api("/api/auth/logout", { method: "POST" }); } catch {}
   currentUser = null;
+  localStorage.removeItem("aura-entry-mode");
   $("#app-shell").classList.add("hidden"); $("#auth-page").classList.remove("hidden");
   $("#auth-password").value = ""; setAuthMode("login");
 });
 
+function mapTileSpec() {
+  const dark = document.documentElement.dataset.theme === "dark";
+  return dark
+    ? { url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", attribution: "Ruas &copy; OpenStreetMap, mapa &copy; CARTO" }
+    : { url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", attribution: "Ruas &copy; OpenStreetMap, mapa &copy; CARTO" };
+}
+
+function updateMapBaseLayers() {
+  const spec = mapTileSpec();
+  if (cityMap) {
+    cityBaseLayer?.remove();
+    cityBaseLayer = L.tileLayer(spec.url, { maxZoom: 20, subdomains: "abcd", attribution: spec.attribution }).addTo(cityMap);
+    cityBaseLayer.bringToBack();
+  }
+  if (adminMap) {
+    adminBaseLayer?.remove();
+    adminBaseLayer = L.tileLayer(spec.url, { maxZoom: 20, subdomains: "abcd", attribution: spec.attribution }).addTo(adminMap);
+    adminBaseLayer.bringToBack();
+  }
+}
+
 function initializeMap() {
   if (cityMap || !window.L) return setTimeout(() => cityMap?.invalidateSize(), 80);
-  cityMap = L.map("city-map", { zoomControl: true }).setView([-2.79333, -57.07], 15);
-  L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19, attribution: "Tiles &copy; Esri" }).addTo(cityMap);
-  L.tileLayer("https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19, opacity: .9, attribution: "Ruas &copy; Esri" }).addTo(cityMap);
-  L.tileLayer("https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19, opacity: .95 }).addTo(cityMap);
+  cityMap = L.map("city-map", { zoomControl: true }).setView(mapHome, mapHomeZoom);
+  updateMapBaseLayers();
   cityMap.on("click", event => {
     if (activeRide) {
       $("#map-message").textContent = "Finalize ou cancele a corrida atual antes de alterar a rota.";
@@ -548,12 +603,115 @@ function initializeMap() {
       return;
     }
     resetPassenger();
-    if (pickMode === "origin") { originPoint = event.latlng; pickMode = "destination"; }
-    else destinationPoint = event.latlng;
+    if (pickMode === "origin") { originPoint = event.latlng; pickMode = "destination"; reversePointLabel("origin", originPoint); }
+    else { destinationPoint = event.latlng; reversePointLabel("destination", destinationPoint); }
     renderRoute();
   });
   renderRoute();
 }
+
+function cloneMapPoint(point) {
+  if (!point) return null;
+  const clone = L.latLng(point.lat, point.lng);
+  if (point.label) clone.label = point.label;
+  return clone;
+}
+
+async function reversePointLabel(kind, point) {
+  const expected = `${point.lat.toFixed(6)},${point.lng.toFixed(6)}`;
+  try {
+    const result = await api(`/api/map/reverse?lat=${encodeURIComponent(point.lat)}&lng=${encodeURIComponent(point.lng)}`);
+    const current = kind === "origin" ? originPoint : destinationPoint;
+    if (!current || `${current.lat.toFixed(6)},${current.lng.toFixed(6)}` !== expected || !result.name) return;
+    current.label = shortPlaceName(result.name);
+    $(`#${kind}-label`).textContent = pointText(current);
+    $(`#${kind}-search`).value = current.label;
+  } catch {}
+}
+
+function openMapPicker() {
+  if (activeRide) return;
+  mapPickerSnapshot = { origin: cloneMapPoint(originPoint), destination: cloneMapPoint(destinationPoint), pickMode };
+  $("#origin-search").value = originPoint?.label || "";
+  $("#destination-search").value = destinationPoint?.label || "";
+  $("#city-map-shell").classList.add("expanded");
+  document.body.classList.add("map-picker-open");
+  setTimeout(() => {
+    cityMap?.invalidateSize();
+    if (originPoint && destinationPoint && routeLine) cityMap.fitBounds(routeLine.getBounds(), { padding: [80, 80], maxZoom: 17 });
+  }, 100);
+}
+
+function closeMapPicker(save = true) {
+  if (!save && mapPickerSnapshot) {
+    originPoint = cloneMapPoint(mapPickerSnapshot.origin);
+    destinationPoint = cloneMapPoint(mapPickerSnapshot.destination);
+    pickMode = mapPickerSnapshot.pickMode;
+    renderRoute();
+  }
+  mapPickerSnapshot = null;
+  mapSearchController?.abort();
+  $$(".map-search-results").forEach(list => list.classList.add("hidden"));
+  $("#city-map-shell").classList.remove("expanded");
+  document.body.classList.remove("map-picker-open");
+  setTimeout(() => cityMap?.invalidateSize(), 80);
+}
+
+async function searchMap(kind, query) {
+  const results = $(`#${kind}-search-results`);
+  mapSearchController?.abort();
+  if (query.trim().length < 3) {
+    results.classList.add("hidden");
+    results.innerHTML = "";
+    return;
+  }
+  mapSearchController = new AbortController();
+  results.innerHTML = `<p>Pesquisando em Barreirinha…</p>`;
+  results.classList.remove("hidden");
+  try {
+    const response = await fetch(`/api/map/search?q=${encodeURIComponent(query.trim())}`, { credentials: "same-origin", signal: mapSearchController.signal });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || "Não foi possível pesquisar agora.");
+    const places = data.places || [];
+    results.innerHTML = places.length ? places.map((place, index) => `<button type="button" data-place-index="${index}"><strong>${escapeHtml(place.name.split(",")[0])}</strong><small>${escapeHtml(place.name)}</small></button>`).join("") : `<p>Nenhum resultado exato. Marque o ponto diretamente no mapa.</p>`;
+    $$(`#${kind}-search-results [data-place-index]`).forEach(button => button.onclick = () => {
+      const place = places[Number(button.dataset.placeIndex)];
+      const point = L.latLng(place.lat, place.lng);
+      point.label = shortPlaceName(place.name);
+      if (kind === "origin") { originPoint = point; pickMode = "destination"; }
+      else { destinationPoint = point; pickMode = "destination"; }
+      $(`#${kind}-search`).value = point.label;
+      results.classList.add("hidden");
+      renderRoute();
+      cityMap.setView(point, 17);
+      resetPassenger();
+    });
+  } catch (error) {
+    if (error.name !== "AbortError") results.innerHTML = `<p>${escapeHtml(error.message)} Marque no mapa se preferir.</p>`;
+  }
+}
+
+function bindMapSearch(kind) {
+  $(`#${kind}-search`).addEventListener("input", event => {
+    clearTimeout(mapSearchTimer);
+    mapSearchTimer = setTimeout(() => searchMap(kind, event.target.value), 650);
+  });
+  $(`#${kind}-search`).addEventListener("focus", () => { pickMode = kind; renderRoute(); });
+}
+
+bindMapSearch("origin");
+bindMapSearch("destination");
+$("#open-map-picker").onclick = openMapPicker;
+$("#close-map-picker").onclick = () => closeMapPicker(false);
+$("#cancel-map-picker").onclick = () => closeMapPicker(false);
+$("#confirm-map-picker").onclick = () => {
+  if (!originPoint || !destinationPoint) {
+    $("#map-message").textContent = "Escolha a saída e o destino antes de confirmar.";
+    $("#map-message").classList.remove("hidden");
+    return;
+  }
+  closeMapPicker(true);
+};
 
 function markerIcon(letter, kind) { return L.divIcon({ className: "aura-marker-wrap", html: `<span class="aura-marker ${kind}">${letter}</span>`, iconSize: [38,38], iconAnchor: [19,36] }); }
 function driverMarkerIcon(driver) {
@@ -699,8 +857,24 @@ async function renderRoute() {
     driverMarkers.push(marker);
   });
   renderProximity();
-  if (originPoint) originMarker = L.marker(originPoint, { icon: markerIcon("A", "origin") }).addTo(cityMap);
-  if (destinationPoint) destinationMarker = L.marker(destinationPoint, { icon: markerIcon("B", "destination") }).addTo(cityMap);
+  if (originPoint) {
+    originMarker = L.marker(originPoint, { icon: markerIcon("A", "origin"), draggable: !activeRide }).addTo(cityMap);
+    if (!activeRide) originMarker.on("dragend", event => {
+      originPoint = event.target.getLatLng();
+      reversePointLabel("origin", originPoint);
+      renderRoute();
+      resetPassenger();
+    });
+  }
+  if (destinationPoint) {
+    destinationMarker = L.marker(destinationPoint, { icon: markerIcon("B", "destination"), draggable: !activeRide }).addTo(cityMap);
+    if (!activeRide) destinationMarker.on("dragend", event => {
+      destinationPoint = event.target.getLatLng();
+      reversePointLabel("destination", destinationPoint);
+      renderRoute();
+      resetPassenger();
+    });
+  }
   $("#origin-label").textContent = pointText(originPoint); $("#destination-label").textContent = pointText(destinationPoint);
   $("#swap").disabled = !(originPoint && destinationPoint); $("#clear-route").disabled = !(originPoint || destinationPoint);
   $("#pick-origin").classList.toggle("active", pickMode === "origin"); $("#pick-destination").classList.toggle("active", pickMode === "destination");
@@ -735,7 +909,35 @@ async function renderRoute() {
 $("#pick-origin").onclick = () => { pickMode = "origin"; renderRoute(); };
 $("#pick-destination").onclick = () => { pickMode = "destination"; renderRoute(); };
 $("#swap").onclick = () => { [originPoint, destinationPoint] = [destinationPoint, originPoint]; renderRoute(); resetPassenger(); };
-$("#clear-route").onclick = () => { originPoint = destinationPoint = null; pickMode = "origin"; renderRoute(); resetPassenger(); };
+
+function clearRouteSelection({ resetMap = false, closePicker = false } = {}) {
+  routeController?.abort();
+  mapSearchController?.abort();
+  originPoint = null;
+  destinationPoint = null;
+  pickMode = "origin";
+  mapPickerSnapshot = null;
+  $("#origin-search").value = "";
+  $("#destination-search").value = "";
+  $$(".map-search-results").forEach(list => {
+    list.innerHTML = "";
+    list.classList.add("hidden");
+  });
+  if (closePicker) {
+    $("#city-map-shell").classList.remove("expanded");
+    document.body.classList.remove("map-picker-open");
+  }
+  void renderRoute();
+  if (resetMap) setTimeout(() => {
+    cityMap?.invalidateSize();
+    cityMap?.setView(mapHome, mapHomeZoom);
+  }, 90);
+}
+
+$("#clear-route").onclick = () => {
+  clearRouteSelection();
+  resetPassenger();
+};
 
 function fareValue() {
   const info = vehicles[selectedVehicle];
@@ -752,8 +954,6 @@ function updatePrice() {
   $("#fare").textContent = valid ? brl(fare + platformFee) : "Calculando…";
   $("#fare-line").textContent = valid ? brl(fare) : "Calculando…";
   $("#total").textContent = valid ? brl(fare + platformFee) : "Calculando…";
-  $("#driver-share").textContent = valid ? brl(fare * .9) : "—";
-  $("#platform-share").textContent = valid ? brl(fare * .1) : "—";
   const distance = Number(routeDistance);
   $("#fare-description").textContent = routeDistance === null ? `Mínimo para ${info.name.toLowerCase()}` : Number.isFinite(distance) ? `${distance.toFixed(1).replace(".", ",")} km pela rota viária` : "Aguardando uma rota válida";
 }
@@ -806,7 +1006,7 @@ $("#action-button").onclick = async () => {
       $("#action-button").disabled = false;
       $("#action-button").textContent = `Pedir ${info.name.toLowerCase()}`;
     }
-  } else if (passengerStep === "done") { activeRide = null; setRideControlsLocked(false); $("#clear-route").click(); }
+  }
 };
 
 async function resumePassengerRide() {
@@ -842,8 +1042,6 @@ function applyServerPrice(ride) {
   $("#fare").textContent = brl(ride.totalCents / 100);
   $("#fare-line").textContent = brl(fare);
   $("#total").textContent = brl(ride.totalCents / 100);
-  $("#driver-share").textContent = brl(ride.driverShareCents / 100);
-  $("#platform-share").textContent = brl(ride.platformShareCents / 100);
 }
 
 function renderPassengerRide(ride, payment = null) {
@@ -873,8 +1071,8 @@ function renderPassengerRide(ride, payment = null) {
       $("#payment-panel").innerHTML = `<div class="payment-pending"><span>R$</span><h3>Pagamento em dinheiro</h3><p>Entregue ${brl(ride.totalCents / 100)} ao motorista. Ele confirmará o recebimento.</p></div>`;
     } else if (payment) renderPixPayment(payment, ride);
   } else if (["paid", "completed"].includes(ride.status)) {
-    clearInterval(ridePoller);
-    showRating();
+    finishPassengerRide(ride);
+    return;
   } else if (ride.status === "cancelled") return handleExpiredPassengerRide(ride);
   renderAssignedDriver(ride.driver, ride.status);
   updateDriverTracking(ride);
@@ -892,7 +1090,7 @@ function handleExpiredPassengerRide(ride = null) {
 }
 
 function setRideControlsLocked(locked) {
-  $$('[data-vehicle], #pick-origin, #pick-destination, #swap, #clear-route, #payment-method').forEach(control => control.disabled = locked);
+  $$('[data-vehicle], #pick-origin, #pick-destination, #swap, #clear-route, #open-map-picker, #payment-method').forEach(control => control.disabled = locked);
 }
 
 function renderPixPayment(payment, ride) {
@@ -903,17 +1101,27 @@ function renderPixPayment(payment, ride) {
   };
 }
 
-function showRating() {
-  passengerStep = "done";
+function finishPassengerRide(ride) {
+  const completedRideId = ride.id;
+  clearInterval(ridePoller);
+  activeRide = null;
+  setRideControlsLocked(false);
+  resetPassenger();
+  clearRouteSelection({ resetMap: true, closePicker: true });
+  showRating(completedRideId);
+}
+
+function showRating(completedRideId) {
+  passengerStep = "idle";
   $("#action-button").classList.remove("hidden");
-  $("#action-button").disabled = false;
-  $("#action-button").textContent = "Pedir outra corrida";
-  $("#payment-panel").innerHTML = `<div class="success-box"><span>✓</span><h3>Corrida concluída</h3><p>Pagamento confirmado. A avaliação é opcional.</p></div><div class="rating-box"><span>Se quiser, avalie o motorista</span><strong>Como foi a corrida?</strong><div>${[1,2,3,4,5].map(n => `<button data-star="${n}">★</button>`).join("")}</div><button id="send-rating" class="secondary" disabled>Enviar avaliação</button></div>`;
+  $("#action-button").disabled = true;
+  $("#action-button").textContent = "Marque uma nova rota";
+  $("#payment-panel").innerHTML = `<div class="success-box"><span>✓</span><h3>Corrida concluída</h3><p>Pagamento confirmado. O mapa já está livre para a próxima corrida.</p></div><div class="rating-box"><span>Se quiser, avalie o motorista</span><strong>Como foi a corrida?</strong><div>${[1,2,3,4,5].map(n => `<button data-star="${n}">★</button>`).join("")}</div><button id="send-rating" class="secondary" disabled>Enviar avaliação</button></div>`;
   let selectedRating = 0;
   $$('[data-star]').forEach(button => button.onclick = () => { selectedRating = Number(button.dataset.star); $$('[data-star]').forEach(star => star.classList.toggle("active", Number(star.dataset.star) <= selectedRating)); $("#send-rating").disabled = false; });
   $("#send-rating").onclick = async () => {
     try {
-      await api(`/api/rides/${activeRide.id}/rate`, { method: "POST", body: { stars: selectedRating } });
+      await api(`/api/rides/${completedRideId}/rate`, { method: "POST", body: { stars: selectedRating } });
       $(".rating-box").innerHTML = `<span>Obrigado!</span><strong>Avaliação enviada.</strong>`;
     } catch (error) { alert(error.message); }
   };
@@ -949,12 +1157,20 @@ function renderDriverIdle() {
   $("#driver-panel").innerHTML = `<span>${info.code}</span><h2>${driverOnline ? "Aguardando chamadas" : "Você está indisponível"}</h2><p>${driverOnline ? `Somente corridas de ${info.name.toLowerCase()} aparecerão aqui.` : "Fique disponível para começar a receber chamadas próximas."}</p>`;
 }
 
-function showIncomingDriverRide(ride) {
+function showIncomingDriverRide(ride, walletBalanceCents = currentWalletBalanceCents) {
   if (!driverOnline || !ride) return;
   const info = vehicles[currentUser.vehicle || "mototaxi"]; driverStep = "incoming";
+  currentWalletBalanceCents = Number(walletBalanceCents || 0);
+  const cash = ride.paymentMethod === "CASH";
+  const required = Number(ride.cashChargeCents ?? (ride.platformShareCents + ride.fixedFeeCents));
+  const enoughCredit = !cash || currentWalletBalanceCents >= required;
+  const paymentInfo = cash
+    ? `<div class="cash-credit-check ${enoughCredit ? "ready" : "low"}"><span>Dinheiro</span><div><small>Crédito que será descontado</small><strong>${brl(required / 100)}</strong></div><div><small>Seu saldo</small><strong>${brl(currentWalletBalanceCents / 100)}</strong></div></div>`
+    : `<div class="cash-credit-check ready"><span>PIX</span><div><small>Pagamento</small><strong>Confirmado pelo app</strong></div></div>`;
   $("#driver-panel").className = "empty incoming";
-  $("#driver-panel").innerHTML = `<span>${info.code}</span><small class="incoming-label">Nova chamada • ${info.name}</small><strong class="earn">${brl(ride.driverShareCents / 100)}</strong><div class="route-mini"><span><b>A</b> Passageiro a ${String(ride.pickupDistanceKm).replace(".", ",")} km</span><span><b>B</b> Corrida de ${String(ride.distanceKm).replace(".", ",")} km</span></div><div class="actions"><button id="reject" class="secondary">Ignorar</button><button id="accept" class="primary">Aceitar corrida</button></div>`;
+  $("#driver-panel").innerHTML = `<span>${info.code}</span><small class="incoming-label">Nova chamada • ${info.name}</small><strong class="earn">${brl(ride.driverShareCents / 100)}</strong><small>Valor líquido do motorista</small><div class="route-mini"><span><b>A</b> Passageiro a ${String(ride.pickupDistanceKm).replace(".", ",")} km</span><span><b>B</b> Corrida de ${String(ride.distanceKm).replace(".", ",")} km</span></div>${paymentInfo}<div class="actions"><button id="reject" class="secondary">Ignorar</button><button id="accept" class="primary" ${enoughCredit ? "" : "disabled"}>${enoughCredit ? "Aceitar corrida" : "Crédito insuficiente"}</button></div>${enoughCredit ? "" : `<button id="open-wallet-from-ride" class="secondary">Adicionar crédito na carteira</button>`}`;
   $("#reject").onclick = () => renderDriverIdle();
+  $("#open-wallet-from-ride")?.addEventListener("click", () => showView("wallet"));
   $("#accept").onclick = async () => {
     try { const result = await api(`/api/rides/${ride.id}/accept`, { method: "POST" }); activeRide = result.ride; renderDriverRide(activeRide); }
     catch (error) { alert(error.message); renderDriverIdle(); }
@@ -992,7 +1208,8 @@ function startDriverPolling() {
       if (current.ride) { activeRide = current.ride; renderDriverRide(activeRide); return; }
       activeRide = null;
       const available = await api("/api/rides/available");
-      if (available.rides?.[0]) showIncomingDriverRide(available.rides[0]); else renderDriverIdle();
+      currentWalletBalanceCents = Number(available.walletBalanceCents || 0);
+      if (available.rides?.[0]) showIncomingDriverRide(available.rides[0], currentWalletBalanceCents); else renderDriverIdle();
     } catch {}
   }, 3000);
 }
@@ -1044,6 +1261,71 @@ $("#online-toggle").onclick = async () => {
   finally { $("#online-toggle").disabled = false; }
 };
 
+function walletStatusText(status) {
+  if (["RECEIVED", "CONFIRMED"].includes(status)) return "Crédito confirmado";
+  if (["REFUNDED", "DELETED"].includes(status)) return "Pagamento cancelado";
+  return "Aguardando pagamento";
+}
+
+function renderWalletPayment(topup) {
+  const container = $("#wallet-payment");
+  if (!topup || ["RECEIVED", "CONFIRMED"].includes(topup.status)) {
+    container.classList.add("hidden");
+    container.innerHTML = "";
+    return;
+  }
+  container.innerHTML = `<div class="wallet-pix"><span>PIX</span><h3>${brl(topup.amountCents / 100)}</h3><p>Escaneie o QR Code ou copie o código. O saldo entra automaticamente após a confirmação.</p><img src="${escapeHtml(topup.image)}" alt="QR Code para adicionar crédito"><textarea id="wallet-pix-code" readonly>${escapeHtml(topup.payload)}</textarea><button id="copy-wallet-pix" class="primary" type="button">Copiar código Pix</button><small>${escapeHtml(walletStatusText(topup.status))}</small></div>`;
+  container.classList.remove("hidden");
+  $("#copy-wallet-pix").onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(topup.payload);
+      $("#copy-wallet-pix").textContent = "Código copiado";
+    } catch { $("#wallet-pix-code").select(); }
+  };
+}
+
+async function renderWallet() {
+  if (!currentUser?.canDrive || currentMode !== "driver") return;
+  try {
+    const result = await api("/api/driver/wallet");
+    currentWalletBalanceCents = Number(result.balanceCents || 0);
+    $("#wallet-balance").textContent = brl(currentWalletBalanceCents / 100);
+    const entries = result.entries || [];
+    $("#wallet-history").innerHTML = entries.length ? entries.map(entry => {
+      const positive = Number(entry.amount_cents) >= 0;
+      return `<div><span class="wallet-entry-icon ${positive ? "positive" : "negative"}">${positive ? "+" : "−"}</span><p><strong>${escapeHtml(entry.description)}</strong><small>${new Date(`${entry.created_at}Z`).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}</small></p><b class="${positive ? "positive" : "negative"}">${positive ? "+" : "−"}${brl(Math.abs(Number(entry.amount_cents)) / 100)}</b></div>`;
+    }).join("") : `<p class="muted">Nenhuma movimentação ainda.</p>`;
+    const pending = (result.topups || []).find(topup => !["RECEIVED", "CONFIRMED", "REFUNDED", "DELETED"].includes(topup.status));
+    renderWalletPayment(pending);
+    if (pending && !walletPoller) walletPoller = setInterval(renderWallet, 5000);
+    if (!pending && walletPoller) { clearInterval(walletPoller); walletPoller = null; }
+  } catch (error) {
+    setMessage($("#wallet-error"), error.message);
+  }
+}
+
+$$('[data-wallet-amount]').forEach(button => button.onclick = () => {
+  $$('[data-wallet-amount]').forEach(item => item.classList.toggle("active", item === button));
+  $("#wallet-amount").value = (Number(button.dataset.walletAmount) / 100).toFixed(2).replace(".", ",");
+});
+
+$("#wallet-amount").addEventListener("input", () => $$('[data-wallet-amount]').forEach(item => item.classList.remove("active")));
+$("#wallet-topup-form").onsubmit = async event => {
+  event.preventDefault();
+  const output = $("#wallet-error");
+  output.classList.add("hidden");
+  const raw = $("#wallet-amount").value.trim().replace(/\./g, "").replace(",", ".");
+  const amountCents = Math.round(Number(raw) * 100);
+  const submit = event.submitter || event.target.querySelector('[type="submit"]');
+  submit.disabled = true;
+  try {
+    const result = await api("/api/driver/wallet/topups", { method: "POST", body: { amountCents } });
+    renderWalletPayment(result.topup);
+    if (!walletPoller) walletPoller = setInterval(renderWallet, 5000);
+  } catch (error) { setMessage(output, error.message); }
+  finally { submit.disabled = false; }
+};
+
 const operationStatusLabels = {
   searching: "Buscando motorista",
   accepted: "Motorista a caminho",
@@ -1056,10 +1338,8 @@ const operationStatusLabels = {
 
 function initializeAdminMap() {
   if (adminMap || !window.L || !$("#admin-operations-map")) return;
-  adminMap = L.map("admin-operations-map", { zoomControl: true }).setView([-2.79333, -57.07], 15);
-  L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19, attribution: "Tiles &copy; Esri" }).addTo(adminMap);
-  L.tileLayer("https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19, opacity: .9, attribution: "Ruas &copy; Esri" }).addTo(adminMap);
-  L.tileLayer("https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19, opacity: .95 }).addTo(adminMap);
+  adminMap = L.map("admin-operations-map", { zoomControl: true }).setView(mapHome, mapHomeZoom);
+  updateMapBaseLayers();
   adminRouteLayer = L.layerGroup().addTo(adminMap);
   adminRideLayer = L.layerGroup().addTo(adminMap);
   adminDriverLayer = L.layerGroup().addTo(adminMap);
@@ -1178,16 +1458,34 @@ async function decideDriver(id, action) {
 }
 
 async function decidePasswordReset(id, action) {
-  const whatsappWindow = action === "approve" ? window.open("about:blank", "_blank") : null;
   try {
     const result = await api(`/api/admin/password-resets/${id}/${action}`, { method: "POST" });
-    if (action === "approve") {
-      const text = `Olá, ${result.name}. Recebemos seu pedido de recuperação da Aura Bae. Use este link em até ${result.expiresInMinutes} minutos para criar uma nova senha: ${result.recoveryUrl}`;
-      if (whatsappWindow) whatsappWindow.location.href = `https://wa.me/55${result.phone}?text=${encodeURIComponent(text)}`;
-      else location.href = `https://wa.me/55${result.phone}?text=${encodeURIComponent(text)}`;
-    }
+    if (action === "approve") showRecoveryShare(result);
     renderAdmin();
-  } catch (error) { whatsappWindow?.close(); alert(error.message); }
+  } catch (error) { alert(error.message); }
+}
+
+function whatsappUrl(phone, message) {
+  return `https://wa.me/${digits(phone, 13)}?text=${encodeURIComponent(message)}`;
+}
+
+function openWhatsApp(url) {
+  window.location.assign(url);
+}
+
+function showRecoveryShare(result) {
+  const text = `Olá, ${result.name}. Recebemos seu pedido de recuperação da Aura Bae. Use este link em até ${result.expiresInMinutes} minutos para criar uma nova senha: ${result.recoveryUrl}`;
+  const url = whatsappUrl(`55${result.phone}`, text);
+  const panel = $("#recovery-share");
+  panel.innerHTML = `<small>Link temporário gerado</small><strong>${escapeHtml(result.name)}</strong><p>Válido por ${result.expiresInMinutes} minutos. Envie agora pelo WhatsApp.</p><div><button id="send-recovery-whatsapp" class="primary" type="button">Enviar pelo WhatsApp</button><button id="copy-recovery-link" class="secondary" type="button">Copiar link</button></div>`;
+  panel.classList.remove("hidden");
+  $("#send-recovery-whatsapp").onclick = () => openWhatsApp(url);
+  $("#copy-recovery-link").onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(result.recoveryUrl);
+      $("#copy-recovery-link").textContent = "Link copiado";
+    } catch { prompt("Copie o link abaixo:", result.recoveryUrl); }
+  };
 }
 
 async function createDemoUsers() {
@@ -1251,6 +1549,7 @@ function renderProfile() {
   const previews = [];
   if (currentUser.vehiclePhoto) previews.push(`<figure><img src="${currentUser.vehiclePhoto}" alt="Foto do veículo"><figcaption>Veículo</figcaption></figure>`);
   $("#driver-photo-previews").innerHTML = previews.join("");
+  if (!croppedPhotoData.has("driver-profile-photo")) updatePhotoPicker($("#driver-profile-photo"), currentUser.profilePhoto, "Foto atual");
   if (!croppedPhotoData.has("driver-vehicle-photo")) updatePhotoPicker($("#driver-vehicle-photo"), currentUser.vehiclePhoto, "Foto atual");
 }
 
@@ -1278,10 +1577,12 @@ $("#driver-application-form").onsubmit = async event => {
       vehicleModel: $("#driver-profile-model").value,
       pixKeyType: $("#driver-profile-pix-type").value,
       pixKey: $("#driver-profile-pix-key").value,
+      profilePhoto: await selectedPhotoData("driver-profile-photo"),
       vehiclePhoto: await selectedPhotoData("driver-vehicle-photo")
     } });
     currentUser = result.user;
     currentUser.vehicle = currentUser.vehicleType; currentUser.vehicleId = currentUser.vehicleModel;
+    croppedPhotoData.delete("driver-profile-photo");
     croppedPhotoData.delete("driver-vehicle-photo");
     renderNav(); renderProfile(); renderDriverProfile();
     setMessage(output, "Perfil de motorista ativo. Você já pode ficar disponível.", true);
@@ -1376,9 +1677,10 @@ function updateSupportLink() {
   if (!currentUser) return;
   const topic = $("#support-topic").value, message = $("#support-message").value;
   const text = `Olá, suporte Aura Bae. Meu nome é ${currentUser.name}, telefone ${phoneText(currentUser.phone)}. Assunto: ${topic}.${message ? ` Detalhes: ${message}` : ""}`;
-  $("#support-link").href = `https://wa.me/${supportPhone}?text=${encodeURIComponent(text)}`;
+  $("#support-link").dataset.whatsappUrl = whatsappUrl(supportPhone, text);
 }
 $("#support-topic").onchange = updateSupportLink; $("#support-message").oninput = updateSupportLink;
+$("#support-link").onclick = () => openWhatsApp($("#support-link").dataset.whatsappUrl || whatsappUrl(supportPhone, "Olá, suporte Aura Bae."));
 
 (async () => {
   try {

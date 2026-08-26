@@ -91,8 +91,12 @@ async function routeApi(request, env, ctx, url) {
   if (pathname === "/api/profile/password" && request.method === "POST") return changePassword(request, env);
   if (pathname === "/api/profile/pix" && request.method === "POST") return changePixKey(request, env);
   if (pathname === "/api/profile/tutorial" && request.method === "POST") return markTutorialSeen(request, env);
+  if (pathname === "/api/map/search" && request.method === "GET") return searchMapPlaces(request, env, url);
+  if (pathname === "/api/map/reverse" && request.method === "GET") return reverseMapPlace(request, env, url);
   if (pathname === "/api/driver/apply" && request.method === "POST") return applyAsDriver(request, env);
   if (pathname === "/api/driver/status" && request.method === "POST") return updateDriverStatus(request, env);
+  if (pathname === "/api/driver/wallet" && request.method === "GET") return driverWallet(request, env);
+  if (pathname === "/api/driver/wallet/topups" && request.method === "POST") return createWalletTopup(request, env);
   if (pathname === "/api/drivers/nearby" && request.method === "GET") return nearbyDrivers(request, env, url);
   if (pathname === "/api/rides" && request.method === "POST") return createRide(request, env);
   if (pathname === "/api/rides/current" && request.method === "GET") return currentRide(request, env, url);
@@ -195,12 +199,16 @@ async function login(request, env) {
   const body = await readJson(request);
   const phone = normalizePhone(body?.phone);
   const password = String(body?.password || "");
+  const loginMode = body?.mode === "driver" ? "driver" : "passenger";
   const user = await env.DB.prepare("SELECT * FROM users WHERE phone = ? LIMIT 1").bind(phone).first();
   if (!user || !(await verifyPassword(password, user.password_salt, user.password_hash))) {
     return json({ error: "Telefone ou senha incorretos." }, 401);
   }
   if (user.status === "suspended" || user.status === "rejected") return json({ error: "Este cadastro não está liberado. Fale com o suporte." }, 403);
-  return createSessionResponse(env, user);
+  if (user.role !== "admin" && loginMode === "driver" && !isApprovedDriver(user)) {
+    return json({ error: "Este telefone ainda não possui um perfil de motorista ativo. Entre como passageiro ou faça o cadastro de motorista." }, 403);
+  }
+  return createSessionResponse(env, user, 200, { loginMode: user.role === "admin" ? "admin" : loginMode });
 }
 
 async function logout(request, env) {
@@ -399,6 +407,63 @@ async function cleanupInactiveRides(env) {
   await expirePasswordResets(env);
 }
 
+async function searchMapPlaces(request, env, url) {
+  const user = await requireUser(request, env);
+  if (user instanceof Response) return user;
+  const query = cleanText(url.searchParams.get("q"), 120);
+  if (query.length < 3) return json({ places: [] });
+  const endpoint = new URL("https://nominatim.openstreetmap.org/search");
+  endpoint.searchParams.set("format", "jsonv2");
+  endpoint.searchParams.set("limit", "6");
+  endpoint.searchParams.set("countrycodes", "br");
+  endpoint.searchParams.set("accept-language", "pt-BR");
+  endpoint.searchParams.set("viewbox", "-57.16,-2.72,-56.98,-2.86");
+  endpoint.searchParams.set("bounded", "1");
+  endpoint.searchParams.set("q", `${query}, Barreirinha, Amazonas`);
+  const response = await fetch(endpoint, {
+    headers: {
+      "accept": "application/json",
+      "user-agent": "AuraBae/1.0 (kuadmff2@gmail.com)"
+    }
+  });
+  if (!response.ok) return json({ error: "A pesquisa de lugares está temporariamente indisponível. Você ainda pode marcar no mapa." }, 503);
+  const data = await response.json().catch(() => []);
+  const places = (Array.isArray(data) ? data : []).map(item => ({
+    id: String(item.place_id || `${item.lat},${item.lon}`),
+    name: cleanText(item.display_name, 220),
+    type: cleanText(item.type || item.category || "local", 60),
+    lat: Number(item.lat),
+    lng: Number(item.lon)
+  })).filter(item => item.name && isBarreirinhaPoint(item.lat, item.lng));
+  return json({ places });
+}
+
+async function reverseMapPlace(request, env, url) {
+  const user = await requireUser(request, env);
+  if (user instanceof Response) return user;
+  const lat = Number(url.searchParams.get("lat"));
+  const lng = Number(url.searchParams.get("lng"));
+  if (!isBarreirinhaPoint(lat, lng)) return json({ name: null });
+  const endpoint = new URL("https://nominatim.openstreetmap.org/reverse");
+  endpoint.searchParams.set("format", "jsonv2");
+  endpoint.searchParams.set("zoom", "18");
+  endpoint.searchParams.set("accept-language", "pt-BR");
+  endpoint.searchParams.set("lat", String(lat));
+  endpoint.searchParams.set("lon", String(lng));
+  try {
+    const response = await fetch(endpoint, {
+      headers: {
+        "accept": "application/json",
+        "user-agent": "AuraBae/1.0 (kuadmff2@gmail.com)"
+      }
+    });
+    const data = response.ok ? await response.json() : null;
+    return json({ name: data?.display_name ? cleanText(data.display_name, 220) : null });
+  } catch {
+    return json({ name: null });
+  }
+}
+
 async function updateDriverStatus(request, env) {
   const user = await requireDriverAccount(request, env);
   if (user instanceof Response) return user;
@@ -406,6 +471,9 @@ async function updateDriverStatus(request, env) {
   const online = Boolean(body?.online);
   const lat = Number(body?.latitude);
   const lng = Number(body?.longitude);
+  if (online && (!user.profile_photo || !user.vehicle_photo)) {
+    return json({ error: "Adicione sua foto e a foto do veículo no perfil antes de ficar disponível." }, 409);
+  }
   if (online && !isBarreirinhaPoint(lat, lng)) return json({ error: "Ative a localização dentro de Barreirinha." }, 400);
   if (online) {
     const passengerRide = await env.DB.prepare(`SELECT id FROM rides WHERE passenger_id = ?
@@ -422,6 +490,92 @@ async function updateDriverStatus(request, env) {
       WHERE driver_id = ? AND status = 'accepted'`).bind(user.id).run();
   }
   return json({ online });
+}
+
+async function walletBalanceCents(env, driverId) {
+  const row = await env.DB.prepare(`SELECT COALESCE(SUM(amount_cents), 0) AS balance
+    FROM driver_wallet_entries WHERE driver_id = ?`).bind(driverId).first();
+  return Number(row?.balance || 0);
+}
+
+async function driverWallet(request, env) {
+  const driver = await requireDriverAccount(request, env);
+  if (driver instanceof Response) return driver;
+  await refreshPendingWalletTopup(env, driver.id);
+  const [balance, entries, topups] = await env.DB.batch([
+    env.DB.prepare(`SELECT COALESCE(SUM(amount_cents), 0) AS value
+      FROM driver_wallet_entries WHERE driver_id = ?`).bind(driver.id),
+    env.DB.prepare(`SELECT id, kind, amount_cents, description, created_at
+      FROM driver_wallet_entries WHERE driver_id = ? ORDER BY created_at DESC LIMIT 30`).bind(driver.id),
+    env.DB.prepare(`SELECT id, amount_cents, payment_status, payload, encoded_image,
+      expiration_date, created_at, paid_at FROM wallet_topups
+      WHERE driver_id = ? ORDER BY created_at DESC LIMIT 10`).bind(driver.id)
+  ]);
+  return json({
+    balanceCents: Number(balance.results?.[0]?.value || 0),
+    entries: entries.results || [],
+    topups: (topups.results || []).map(publicWalletTopup)
+  });
+}
+
+async function createWalletTopup(request, env) {
+  const driver = await requireDriverAccount(request, env);
+  if (driver instanceof Response) return driver;
+  const body = await readJson(request);
+  const amountCents = Math.round(Number(body?.amountCents));
+  if (!Number.isInteger(amountCents) || amountCents < 500 || amountCents > 50000) {
+    return json({ error: "Escolha um valor entre R$ 5,00 e R$ 500,00." }, 400);
+  }
+  if (!env.ASAAS_API_KEY) return json({ error: "Os pagamentos ainda não estão configurados." }, 503);
+  const customerId = await ensureAsaasCustomer(env, driver);
+  const topupId = `WALLET-${crypto.randomUUID()}`;
+  const payment = await asaasFetch(env, "/payments", {
+    method: "POST",
+    body: {
+      customer: customerId,
+      billingType: "PIX",
+      value: amountCents / 100,
+      dueDate: todayManaus(),
+      description: `Crédito da carteira Aura Bae`,
+      externalReference: topupId
+    }
+  });
+  const qr = await asaasFetch(env, `/payments/${encodeURIComponent(payment.id)}/pixQrCode`);
+  await env.DB.prepare(`INSERT INTO wallet_topups
+    (id, driver_id, amount_cents, asaas_payment_id, payment_status, payload, encoded_image, expiration_date)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).bind(
+      topupId, driver.id, amountCents, payment.id, payment.status || "PENDING",
+      qr.payload, qr.encodedImage, qr.expirationDate || null
+    ).run();
+  const topup = await env.DB.prepare(`SELECT id, amount_cents, payment_status, payload,
+    encoded_image, expiration_date, created_at, paid_at FROM wallet_topups WHERE id = ?`).bind(topupId).first();
+  return json({ topup: publicWalletTopup(topup), balanceCents: await walletBalanceCents(env, driver.id) }, 201);
+}
+
+async function refreshPendingWalletTopup(env, driverId) {
+  const topup = await env.DB.prepare(`SELECT * FROM wallet_topups WHERE driver_id = ?
+    AND payment_status NOT IN ('RECEIVED','CONFIRMED','REFUNDED') ORDER BY created_at DESC LIMIT 1`).bind(driverId).first();
+  if (!topup?.asaas_payment_id || !env.ASAAS_API_KEY) return;
+  try {
+    const payment = await asaasFetch(env, `/payments/${encodeURIComponent(topup.asaas_payment_id)}`);
+    await processWalletPayment(env, topup, payment.status || "PENDING");
+  } catch (error) {
+    console.error("Wallet refresh failed", error?.message || error);
+  }
+}
+
+async function processWalletPayment(env, topup, status) {
+  const paid = ["RECEIVED", "CONFIRMED"].includes(status);
+  await env.DB.prepare(`UPDATE wallet_topups SET payment_status = ?,
+    paid_at = CASE WHEN ? = 1 THEN COALESCE(paid_at, CURRENT_TIMESTAMP) ELSE paid_at END
+    WHERE id = ?`).bind(status, paid ? 1 : 0, topup.id).run();
+  if (!paid) return;
+  await env.DB.prepare(`INSERT OR IGNORE INTO driver_wallet_entries
+    (id, driver_id, topup_id, kind, amount_cents, description)
+    VALUES (?, ?, ?, 'topup', ?, ?)`).bind(
+      `credit-${topup.asaas_payment_id}`, topup.driver_id, topup.id,
+      topup.amount_cents, "Crédito adicionado por Pix"
+    ).run();
 }
 
 async function nearbyDrivers(request, env, url) {
@@ -497,9 +651,10 @@ async function availableRides(request, env) {
   const rides = (rows.results || []).map(row => ({
     ...publicRide(row),
     passengerName: firstName(row.passenger_name),
+    cashChargeCents: row.platform_share_cents + row.fixed_fee_cents,
     pickupDistanceKm: round(haversineKm({ lat: location.latitude, lng: location.longitude }, { lat: row.origin_lat, lng: row.origin_lng }), 2)
   })).sort((a, b) => a.pickupDistanceKm - b.pickupDistanceKm);
-  return json({ rides });
+  return json({ rides, walletBalanceCents: await walletBalanceCents(env, user.id) });
 }
 
 async function handleRideAction(request, env, rideId, action) {
@@ -517,6 +672,22 @@ async function handleRideAction(request, env, rideId, action) {
 async function acceptRide(request, env, rideId) {
   const driver = await requireDriverAccount(request, env);
   if (driver instanceof Response) return driver;
+  const offeredRide = await env.DB.prepare(`SELECT * FROM rides WHERE id = ? AND status = 'searching'
+    AND driver_id IS NULL AND vehicle_type = ? AND passenger_id != ? LIMIT 1`)
+    .bind(rideId, driver.vehicle_type, driver.id).first();
+  if (!offeredRide) return json({ error: "Esta corrida já foi aceita ou não está mais disponível." }, 409);
+  if (offeredRide.payment_method === "CASH") {
+    const required = offeredRide.platform_share_cents + offeredRide.fixed_fee_cents;
+    const balance = await walletBalanceCents(env, driver.id);
+    if (balance < required) {
+      return json({
+        error: `Para aceitar esta corrida em dinheiro, adicione pelo menos ${moneyText(required)} de crédito na carteira.`,
+        code: "INSUFFICIENT_WALLET_CREDIT",
+        requiredCents: required,
+        balanceCents: balance
+      }, 402);
+    }
+  }
   const driverRide = await env.DB.prepare(`SELECT id FROM rides WHERE driver_id = ?
     AND status NOT IN ('completed','cancelled') LIMIT 1`).bind(driver.id).first();
   if (driverRide) return json({ error: "Você já possui uma corrida em atendimento." }, 409);
@@ -591,14 +762,17 @@ async function confirmCash(request, env, rideId) {
   if (driver instanceof Response) return driver;
   const ride = await env.DB.prepare("SELECT * FROM rides WHERE id = ? AND driver_id = ? AND payment_method = 'CASH' AND status = 'arrived'").bind(rideId, driver.id).first();
   if (!ride) return json({ error: "Pagamento em dinheiro não está aguardando confirmação." }, 409);
-  const debt = ride.platform_share_cents + ride.fixed_fee_cents;
+  const charge = ride.platform_share_cents + ride.fixed_fee_cents;
+  const balance = await walletBalanceCents(env, driver.id);
+  if (balance < charge) return json({ error: `Crédito insuficiente. Adicione ${moneyText(charge - balance)} à carteira para finalizar.` }, 402);
   const result = await env.DB.prepare("UPDATE rides SET status = 'completed', payment_status = 'RECEIVED_IN_CASH', paid_at = CURRENT_TIMESTAMP, completed_at = CURRENT_TIMESTAMP, last_activity_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'arrived'").bind(rideId).run();
   if (result.meta?.changes) {
-    await env.DB.prepare(`INSERT INTO ledger_entries (id, user_id, ride_id, kind, amount_cents, description)
-      VALUES (?, ?, ?, 'cash_debt', ?, ?)`)
-      .bind(crypto.randomUUID(), driver.id, rideId, -debt, "Comissão e taxa de corrida recebida em dinheiro").run();
+    await env.DB.prepare(`INSERT OR IGNORE INTO driver_wallet_entries
+      (id, driver_id, ride_id, kind, amount_cents, description)
+      VALUES (?, ?, ?, 'cash_fee', ?, ?)`)
+      .bind(crypto.randomUUID(), driver.id, rideId, -charge, "Comissão e taxa da corrida recebida em dinheiro").run();
   }
-  return json({ ride: publicRide(await getRide(env, rideId)) });
+  return json({ ride: publicRide(await getRide(env, rideId)), walletBalanceCents: await walletBalanceCents(env, driver.id) });
 }
 
 async function cancelRide(request, env, rideId) {
@@ -778,21 +952,7 @@ async function payoutPreview(request, env) {
 async function createPixCharge(env, ride) {
   if (!env.ASAAS_API_KEY) throw new Error("ASAAS_API_KEY não configurada");
   const passenger = await getUserById(env, ride.passenger_id);
-  let customerId = passenger.asaas_customer_id;
-  if (!customerId) {
-    const customer = await asaasFetch(env, "/customers", {
-      method: "POST",
-      body: {
-        name: passenger.name,
-        cpfCnpj: passenger.cpf,
-        mobilePhone: passenger.phone,
-        externalReference: passenger.id,
-        notificationDisabled: true
-      }
-    });
-    customerId = customer.id;
-    await env.DB.prepare("UPDATE users SET asaas_customer_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(customerId, passenger.id).run();
-  }
+  const customerId = await ensureAsaasCustomer(env, passenger);
   const payment = await asaasFetch(env, "/payments", {
     method: "POST",
     body: {
@@ -835,6 +995,14 @@ async function asaasWebhook(request, env, ctx) {
 async function processAsaasEvent(env, event) {
   const payment = event.payment;
   if (!payment?.id) return;
+  const topup = await env.DB.prepare("SELECT * FROM wallet_topups WHERE asaas_payment_id = ? LIMIT 1").bind(payment.id).first();
+  if (topup) {
+    const topupStatus = event.event === "PAYMENT_RECEIVED" ? "RECEIVED"
+      : event.event === "PAYMENT_CONFIRMED" ? "CONFIRMED"
+        : payment.status || event.event.replace("PAYMENT_", "");
+    await processWalletPayment(env, topup, topupStatus);
+    return;
+  }
   const ride = await env.DB.prepare("SELECT * FROM rides WHERE asaas_payment_id = ? LIMIT 1").bind(payment.id).first();
   if (!ride) return;
   if (event.event === "PAYMENT_RECEIVED") await markRidePaid(env, ride, payment.id, event.event);
@@ -932,6 +1100,23 @@ async function asaasFetch(env, path, options = {}) {
   return data;
 }
 
+async function ensureAsaasCustomer(env, user) {
+  if (user.asaas_customer_id) return user.asaas_customer_id;
+  const customer = await asaasFetch(env, "/customers", {
+    method: "POST",
+    body: {
+      name: user.name,
+      cpfCnpj: user.cpf,
+      mobilePhone: user.phone,
+      externalReference: user.id,
+      notificationDisabled: true
+    }
+  });
+  await env.DB.prepare("UPDATE users SET asaas_customer_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+    .bind(customer.id, user.id).run();
+  return customer.id;
+}
+
 async function calculateRoute(origin, destination) {
   const endpoint = `https://router.project-osrm.org/route/v1/driving/${origin.lng},${origin.lat};${destination.lng},${destination.lat}?overview=false`;
   const response = await fetch(endpoint, { headers: { "user-agent": "AuraBae/1.0" } });
@@ -952,11 +1137,11 @@ function calculatePricing(vehicle, distanceKm, env) {
   return { fareCents, fixedFeeCents, totalCents: fareCents + fixedFeeCents, platformShareCents, driverShareCents: fareCents - platformShareCents };
 }
 
-async function createSessionResponse(env, user, status = 200) {
+async function createSessionResponse(env, user, status = 200, extra = {}) {
   const token = randomToken(32);
   const expires = new Date(Date.now() + SESSION_SECONDS * 1000).toISOString();
   await env.DB.prepare("INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)").bind(await sha256(token), user.id, expires).run();
-  return json({ user: publicUser(user) }, status, { "Set-Cookie": sessionCookie(token) });
+  return json({ user: publicUser(user), ...extra }, status, { "Set-Cookie": sessionCookie(token) });
 }
 
 async function requireUser(request, env) {
@@ -1047,7 +1232,7 @@ function publicRide(ride) {
     autoCancelled: Boolean(ride.auto_cancelled),
     lastActivityAt: ride.last_activity_at || ride.created_at,
     createdAt: ride.created_at,
-    driver: publicRideDriver(ride)
+    driver: publicRideDriver(ride, true)
   };
 }
 
@@ -1078,6 +1263,19 @@ function publicQr(qr) {
   return { payload: qr.payload, image: `data:image/png;base64,${qr.encoded_image}`, expirationDate: qr.expiration_date };
 }
 
+function publicWalletTopup(topup) {
+  return {
+    id: topup.id,
+    amountCents: Number(topup.amount_cents || 0),
+    status: topup.payment_status,
+    payload: topup.payload,
+    image: `data:image/png;base64,${topup.encoded_image}`,
+    expirationDate: topup.expiration_date || null,
+    createdAt: topup.created_at,
+    paidAt: topup.paid_at || null
+  };
+}
+
 function canAccessRide(user, ride) { return user.role === "admin" || ride.passenger_id === user.id || ride.driver_id === user.id; }
 function driverStatus(user) { return user.driver_status || (user.role === "driver" ? user.status : null); }
 function isApprovedDriver(user) { return driverStatus(user) === "approved"; }
@@ -1098,6 +1296,7 @@ function cleanImage(value) {
 function fieldError(field, error, status = 400) { return json({ error, field }, status); }
 function firstName(name) { return String(name || "Motorista").split(/\s+/)[0]; }
 function numberEnv(value, fallback) { const parsed = Number(value); return Number.isFinite(parsed) ? parsed : fallback; }
+function moneyText(cents) { return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(cents || 0) / 100); }
 function round(value, decimals) { const factor = 10 ** decimals; return Math.round(value * factor) / factor; }
 function todayManaus() { return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Manaus", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()); }
 

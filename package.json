@@ -1,6 +1,6 @@
 {
   "name": "aura-bae-integrado",
-  "version": "2.3.0",
+  "version": "2.5.0",
   "private": true,
   "type": "module",
   "description": "Aura Bae com Cloudflare Workers, D1 e integração Pix Asaas.",
@@ -9,7 +9,8 @@
     "deploy": "wrangler d1 migrations apply aura-bae-db --remote && wrangler deploy",
     "db:local": "wrangler d1 migrations apply aura-bae-db --local",
     "db:remote": "wrangler d1 migrations apply aura-bae-db --remote",
-    "check": "node --check src/worker.js && node --check public/app.js"
+    "check": "node --check src/worker.js && node --check public/app.js",
+    "smoke": "node scripts/smoke-test.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.68.0"
