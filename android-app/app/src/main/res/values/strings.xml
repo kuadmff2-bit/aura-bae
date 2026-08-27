@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Aura Bae</string>
+    <string name="tracking_channel_name">Localização do motorista</string>
+    <string name="rides_channel_name">Novas corridas</string>
+</resources>

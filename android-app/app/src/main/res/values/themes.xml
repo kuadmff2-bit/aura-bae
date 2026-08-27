@@ -1,0 +1,11 @@
+<resources>
+    <style name="Theme.AuraBae" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">@color/aura_background</item>
+        <item name="android:navigationBarColor">@color/aura_background</item>
+        <item name="android:windowBackground">@drawable/splash_background</item>
+        <item name="android:colorAccent">@color/aura_green</item>
+    </style>
+</resources>

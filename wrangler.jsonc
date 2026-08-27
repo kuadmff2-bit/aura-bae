@@ -2,7 +2,8 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "aura-bae",
   "main": "src/worker.js",
-  "compatibility_date": "2026-08-25",
+  "compatibility_date": "2026-08-27",
+  "compatibility_flags": ["nodejs_compat"],
   "keep_vars": true,
   "assets": {
     "directory": "./public",
@@ -30,6 +31,14 @@
     "crons": ["* * * * *", "15 4 * * *"]
   },
   "observability": {
-    "enabled": true
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.01
+    }
   }
 }

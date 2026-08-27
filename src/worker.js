@@ -1,8 +1,10 @@
-const SESSION_COOKIE = "aura_session";
-const SESSION_SECONDS = 60 * 60 * 24 * 30;
+const SESSION_COOKIE = "__Host-aura_session";
+const SESSION_SECONDS = 60 * 60 * 24 * 7;
+const ADMIN_SESSION_SECONDS = 60 * 60 * 2;
 const RESET_SECONDS = 60 * 15;
 const INACTIVE_RIDE_MINUTES = 5;
 const MAX_IMAGE_LENGTH = 550000;
+const MAX_JSON_LENGTH = 1_300_000;
 // Cloudflare Workers currently rejects PBKDF2 iteration counts above 100,000.
 const PASSWORD_ITERATIONS = 100000;
 const VEHICLES = {
@@ -10,32 +12,6 @@ const VEHICLES = {
   motocarro: { name: "Motocarro", minimum: 10, extraKm: 2.5 },
   taxi: { name: "Carro", minimum: 12, extraKm: 3 }
 };
-const DEMO_PASSWORD = "Aura@2026";
-const DEMO_USERS = [
-  {
-    id: "aura-demo-passenger",
-    kind: "Passageiro",
-    name: "Amigo Passageiro",
-    phone: "92900000001",
-    cpf: "11144477735",
-    role: "passenger",
-    driverStatus: null,
-    vehicleType: null,
-    vehicleModel: null
-  },
-  {
-    id: "aura-demo-driver",
-    kind: "Motorista",
-    name: "Amigo Motorista",
-    phone: "92900000002",
-    cpf: "52998224725",
-    role: "driver",
-    driverStatus: "approved",
-    vehicleType: "mototaxi",
-    vehicleModel: "Honda Pop 110i • demonstração"
-  }
-];
-
 export default {
   async fetch(request, env, ctx) {
     try {
@@ -46,18 +22,23 @@ export default {
       const asset = await env.ASSETS.fetch(request);
       const headers = new Headers(asset.headers);
       headers.set("X-Content-Type-Options", "nosniff");
-      headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+      headers.set("Referrer-Policy", "no-referrer");
       headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=(self)");
       headers.set("X-Frame-Options", "DENY");
+      headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+      headers.set("Cross-Origin-Opener-Policy", "same-origin");
+      headers.set("Cross-Origin-Resource-Policy", "same-origin");
+      headers.set("Content-Security-Policy", "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.basemaps.cartocdn.com; connect-src 'self' https://router.project-osrm.org; font-src 'self' data:; manifest-src 'self'; worker-src 'self'; upgrade-insecure-requests");
       return new Response(asset.body, { status: asset.status, statusText: asset.statusText, headers });
     } catch (error) {
-      console.error("Aura Bae request error", error?.message || error);
+      console.error(JSON.stringify({ event: "request_error", error: error?.message || String(error) }));
       return json({ error: "Não foi possível concluir a operação." }, 500);
     }
   },
 
   async scheduled(controller, env, ctx) {
     ctx.waitUntil(cleanupInactiveRides(env));
+    ctx.waitUntil(cleanupSensitiveData(env));
     if (controller.cron === "15 4 * * *" && String(env.AUTOMATIC_PAYOUTS_ENABLED).toLowerCase() === "true") {
       ctx.waitUntil(processDailyPayouts(env));
     }
@@ -106,7 +87,7 @@ async function routeApi(request, env, ctx, url) {
   if (pathname === "/api/admin/drivers" && request.method === "GET") return adminDrivers(request, env);
   if (pathname === "/api/admin/operations" && request.method === "GET") return adminOperations(request, env);
   if (pathname === "/api/admin/password-resets" && request.method === "GET") return adminPasswordResets(request, env);
-  if (pathname === "/api/admin/demo-users" && request.method === "POST") return createDemoUsers(request, env);
+  if (pathname === "/api/profile/delete" && request.method === "POST") return deleteAccount(request, env);
   if (pathname === "/api/admin/payouts/preview" && request.method === "GET") return payoutPreview(request, env);
   if (pathname === "/webhooks/asaas" && request.method === "POST") return asaasWebhook(request, env, ctx);
 
@@ -127,6 +108,8 @@ async function setupStatus(env) {
 }
 
 async function setupAdmin(request, env) {
+  const blocked = await rateLimit(request, env, "admin_setup", "setup", 5, 60 * 60);
+  if (blocked) return blocked;
   const existing = await env.DB.prepare("SELECT COUNT(*) AS total FROM users WHERE role = 'admin'").first();
   if (Number(existing?.total || 0) > 0) return json({ error: "O administrador já foi configurado." }, 409);
   const body = await readJson(request);
@@ -149,13 +132,15 @@ async function setupAdmin(request, env) {
 }
 
 async function register(request, env) {
-  const body = await readJson(request);
+  const body = await readJson(request, MAX_JSON_LENGTH);
   if (!body) return json({ error: "Dados inválidos." }, 400);
   const role = body.role === "driver" ? "driver" : "passenger";
   const name = cleanName(body.name);
   const phone = normalizePhone(body.phone);
   const cpf = normalizeCpf(body.cpf);
   const password = String(body.password || "");
+  const blocked = await rateLimit(request, env, "register", `${phone}:${cpf}`, 4, 60 * 60);
+  if (blocked) return blocked;
   const validation = validateAccount({ name, phone, cpf, password });
   if (validation) return json({ error: validation }, 400);
   const phoneOwner = await env.DB.prepare("SELECT id FROM users WHERE phone = ? LIMIT 1").bind(phone).first();
@@ -186,21 +171,25 @@ async function register(request, env) {
 
   const passwordData = await hashPassword(password);
   const id = crypto.randomUUID();
+  const driverStatusValue = role === "driver" ? "pending" : null;
   await env.DB.prepare(`INSERT INTO users
     (id, name, phone, cpf, password_hash, password_salt, role, status, driver_status,
      vehicle_type, vehicle_model, pix_key, pix_key_type, profile_photo, vehicle_photo)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .bind(id, name, phone, cpf, passwordData.hash, passwordData.salt, role,
-      role === "driver" ? "approved" : "active", role === "driver" ? "approved" : null,
+      "active", driverStatusValue,
       vehicleType, vehicleModel, pixKey, pixKeyType, profilePhoto, vehiclePhoto).run();
+  await auditSecurityEvent(env, id, role === "driver" ? "driver_application_created" : "account_created", id);
   return createSessionResponse(env, await getUserById(env, id), 201);
 }
 
 async function login(request, env) {
-  const body = await readJson(request);
+  const body = await readJson(request, 16_000);
   const phone = normalizePhone(body?.phone);
   const password = String(body?.password || "");
   const loginMode = body?.mode === "driver" ? "driver" : "passenger";
+  const blocked = await rateLimit(request, env, "login", phone || "invalid", 8, 15 * 60);
+  if (blocked) return blocked;
   const user = await env.DB.prepare("SELECT * FROM users WHERE phone = ? LIMIT 1").bind(phone).first();
   if (!user || !(await verifyPassword(password, user.password_salt, user.password_hash))) {
     return json({ error: "Telefone ou senha incorretos." }, 401);
@@ -209,6 +198,7 @@ async function login(request, env) {
   if (user.role !== "admin" && loginMode === "driver" && !isApprovedDriver(user)) {
     return json({ error: "Este telefone ainda não possui um perfil de motorista ativo. Entre como passageiro ou faça o cadastro de motorista." }, 403);
   }
+  await auditSecurityEvent(env, user.id, "login_success", user.id, { client: clientKind(request) });
   return createSessionResponse(env, user, 200, { loginMode: user.role === "admin" ? "admin" : loginMode });
 }
 
@@ -240,6 +230,50 @@ async function updateProfile(request, env) {
   return json({ user: publicUser(await getUserById(env, user.id)) });
 }
 
+async function deleteAccount(request, env) {
+  const user = await requireUser(request, env);
+  if (user instanceof Response) return user;
+  if (user.role === "admin") return json({ error: "A conta administrativa deve ser transferida antes de ser excluída." }, 409);
+  const blocked = await rateLimit(request, env, "delete_account", user.id, 3, 60 * 60);
+  if (blocked) return blocked;
+  const body = await readJson(request, 16_000);
+  const password = String(body?.password || "");
+  if (!(await verifyPassword(password, user.password_salt, user.password_hash))) {
+    return fieldError("deletePassword", "A senha informada está incorreta.", 401);
+  }
+  const activeRide = await env.DB.prepare(`SELECT id FROM rides
+    WHERE (passenger_id = ? OR driver_id = ?) AND status NOT IN ('completed','cancelled') LIMIT 1`)
+    .bind(user.id, user.id).first();
+  if (activeRide) return json({ error: "Finalize ou cancele a corrida atual antes de excluir a conta." }, 409);
+
+  const disabledIdentity = `deleted-${user.id}`;
+  const disabledPassword = await hashPassword(randomToken(32));
+  await auditSecurityEvent(env, user.id, "account_deleted", user.id);
+  await env.DB.batch([
+    env.DB.prepare(`UPDATE users SET name = 'Conta excluída', phone = ?, cpf = ?,
+      password_hash = ?, password_salt = ?, status = 'suspended',
+      driver_status = CASE WHEN driver_status IS NULL THEN NULL ELSE 'suspended' END,
+      vehicle_model = NULL, pix_key = NULL, pix_key_type = NULL, asaas_customer_id = NULL,
+      profile_photo = NULL, vehicle_photo = NULL, deleted_at = CURRENT_TIMESTAMP,
+      updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .bind(disabledIdentity, disabledIdentity, disabledPassword.hash, disabledPassword.salt, user.id),
+    env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(user.id),
+    env.DB.prepare("DELETE FROM password_reset_requests WHERE user_id = ?").bind(user.id),
+    env.DB.prepare("UPDATE driver_locations SET is_online = 0, latitude = 0, longitude = 0, updated_at = CURRENT_TIMESTAMP WHERE driver_id = ?").bind(user.id),
+    env.DB.prepare(`DELETE FROM payment_qr_codes WHERE ride_id IN (
+      SELECT id FROM rides WHERE passenger_id = ? OR driver_id = ?
+    )`).bind(user.id, user.id),
+    env.DB.prepare(`UPDATE rides SET
+      origin_lat = ROUND(origin_lat, 2), origin_lng = ROUND(origin_lng, 2),
+      destination_lat = ROUND(destination_lat, 2), destination_lng = ROUND(destination_lng, 2),
+      anonymized_at = CURRENT_TIMESTAMP
+      WHERE passenger_id = ? OR driver_id = ?`).bind(user.id, user.id),
+    env.DB.prepare(`UPDATE wallet_topups SET payload = '[removido]', encoded_image = '[removido]'
+      WHERE driver_id = ?`).bind(user.id)
+  ]);
+  return json({ deleted: true }, 200, { "Set-Cookie": expiredSessionCookie() });
+}
+
 async function applyAsDriver(request, env) {
   const user = await requirePassengerAccount(request, env);
   if (user instanceof Response) return user;
@@ -257,10 +291,11 @@ async function applyAsDriver(request, env) {
   if (!pixKey || !pixKeyType) return fieldError("driverPixKey", "Informe a chave Pix para receber os repasses.");
   const pixOwner = await env.DB.prepare("SELECT id FROM users WHERE pix_key = ? AND id != ? LIMIT 1").bind(pixKey, user.id).first();
   if (pixOwner) return fieldError("driverPixKey", "Esta chave Pix já está sendo utilizada em outro cadastro.", 409);
-  await env.DB.prepare(`UPDATE users SET driver_status = 'approved', vehicle_type = ?, vehicle_model = ?,
+  await env.DB.prepare(`UPDATE users SET driver_status = 'pending', vehicle_type = ?, vehicle_model = ?,
     pix_key = ?, pix_key_type = ?, profile_photo = ?, vehicle_photo = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
     .bind(vehicleType, vehicleModel, pixKey, pixKeyType, profilePhoto, vehiclePhoto, user.id).run();
-  return json({ user: publicUser(await getUserById(env, user.id)), activated: true });
+  await auditSecurityEvent(env, user.id, "driver_application_submitted", user.id);
+  return json({ user: publicUser(await getUserById(env, user.id)), submitted: true });
 }
 
 async function changePixKey(request, env) {
@@ -281,11 +316,14 @@ async function changePixKey(request, env) {
 async function changePassword(request, env) {
   const user = await requireUser(request, env);
   if (user instanceof Response) return user;
-  const body = await readJson(request);
+  const blocked = await rateLimit(request, env, "change_password", user.id, 5, 60 * 60);
+  if (blocked) return blocked;
+  const body = await readJson(request, 16_000);
   const currentPassword = String(body?.currentPassword || "");
   const newPassword = String(body?.newPassword || "");
   if (!(await verifyPassword(currentPassword, user.password_salt, user.password_hash))) return fieldError("currentPassword", "A senha atual está incorreta.", 401);
-  if (newPassword.length < 8) return fieldError("newPassword", "A nova senha precisa ter pelo menos 8 caracteres.");
+  const passwordError = validatePassword(newPassword);
+  if (passwordError) return fieldError("newPassword", passwordError);
   if (await verifyPassword(newPassword, user.password_salt, user.password_hash)) return fieldError("newPassword", "Escolha uma senha diferente da atual.");
   const passwordData = await hashPassword(newPassword);
   const currentToken = cookieValue(request, SESSION_COOKIE);
@@ -295,6 +333,7 @@ async function changePassword(request, env) {
       .bind(passwordData.hash, passwordData.salt, user.id),
     env.DB.prepare("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?").bind(user.id, currentTokenHash)
   ]);
+  await auditSecurityEvent(env, user.id, "password_changed", user.id);
   return json({ changed: true });
 }
 
@@ -309,10 +348,12 @@ async function markTutorialSeen(request, env) {
 }
 
 async function requestPasswordRecovery(request, env) {
-  const body = await readJson(request);
+  const body = await readJson(request, 16_000);
   const phone = normalizePhone(body?.phone);
   const cpf = normalizeCpf(body?.cpf);
   const generic = { message: "Se os dados estiverem corretos, a solicitação aparecerá para o suporte da Aura Bae." };
+  const blocked = await rateLimit(request, env, "recovery_request", `${phone}:${cpf}`, 4, 60 * 60);
+  if (blocked) return json(generic, 200, { "Retry-After": "3600" });
   if (phone.length !== 11 || cpf.length !== 11) return json(generic);
   const user = await env.DB.prepare("SELECT id FROM users WHERE phone = ? AND cpf = ? LIMIT 1").bind(phone, cpf).first();
   if (!user) return json(generic);
@@ -331,7 +372,7 @@ async function adminPasswordResets(request, env) {
   if (admin instanceof Response) return admin;
   await expirePasswordResets(env);
   const rows = await env.DB.prepare(`SELECT pr.id, pr.status, pr.created_at, pr.expires_at,
-    u.name, u.phone, u.cpf FROM password_reset_requests pr JOIN users u ON u.id = pr.user_id
+    u.name, u.phone, substr(u.cpf, -4) AS cpf_last4 FROM password_reset_requests pr JOIN users u ON u.id = pr.user_id
     WHERE pr.status = 'pending' ORDER BY pr.created_at ASC LIMIT 50`).all();
   return json({ requests: rows.results || [] });
 }
@@ -344,6 +385,7 @@ async function decidePasswordReset(request, env, resetId, action) {
   if (!reset) return json({ error: "Solicitação não encontrada ou já atendida." }, 404);
   if (action === "reject") {
     await env.DB.prepare("UPDATE password_reset_requests SET status = 'rejected' WHERE id = ?").bind(resetId).run();
+    await auditSecurityEvent(env, admin.id, "password_reset_rejected", reset.user_id);
     return json({ rejected: true });
   }
   const token = randomToken(32);
@@ -351,20 +393,25 @@ async function decidePasswordReset(request, env, resetId, action) {
   await env.DB.prepare(`UPDATE password_reset_requests SET status = 'approved', token_hash = ?, expires_at = ?,
     approved_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'pending'`)
     .bind(await sha256(token), expiresAt, resetId).run();
+  await auditSecurityEvent(env, admin.id, "password_reset_approved", reset.user_id);
   const origin = new URL(request.url).origin;
   return json({
     name: reset.name,
     phone: reset.phone,
-    recoveryUrl: `${origin}/?reset=${encodeURIComponent(token)}`,
+    // O fragmento (#) não é enviado ao servidor nem aparece nos registros HTTP.
+    recoveryUrl: `${origin}/#reset=${encodeURIComponent(token)}`,
     expiresInMinutes: 15
   });
 }
 
 async function completePasswordRecovery(request, env) {
-  const body = await readJson(request);
+  const body = await readJson(request, 16_000);
   const token = cleanText(body?.token, 200);
   const password = String(body?.password || "");
-  if (password.length < 8) return fieldError("resetPassword", "A nova senha precisa ter pelo menos 8 caracteres.");
+  const blocked = await rateLimit(request, env, "recovery_complete", token.slice(0, 16) || "missing", 6, 15 * 60);
+  if (blocked) return blocked;
+  const passwordError = validatePassword(password);
+  if (passwordError) return fieldError("resetPassword", passwordError);
   if (!token) return json({ error: "Este link de recuperação é inválido." }, 400);
   const reset = await env.DB.prepare(`SELECT * FROM password_reset_requests WHERE token_hash = ?
     AND status = 'approved' AND datetime(expires_at) > datetime('now') LIMIT 1`).bind(await sha256(token)).first();
@@ -379,6 +426,7 @@ async function completePasswordRecovery(request, env) {
     env.DB.prepare("UPDATE password_reset_requests SET status = 'expired' WHERE user_id = ? AND id != ? AND status IN ('pending','approved')")
       .bind(reset.user_id, reset.id)
   ]);
+  await auditSecurityEvent(env, reset.user_id, "password_recovered", reset.user_id);
   return json({ changed: true });
 }
 
@@ -402,10 +450,33 @@ async function cleanupInactiveRides(env) {
       last_activity_at = CURRENT_TIMESTAMP WHERE status = 'paid'
       AND datetime(COALESCE(last_activity_at, paid_at, created_at)) <= datetime('now', ?)`)
       .bind(stale),
-    env.DB.prepare(`UPDATE driver_locations SET is_online = 0
+    env.DB.prepare(`UPDATE driver_locations SET is_online = 0, latitude = 0, longitude = 0
       WHERE is_online = 1 AND datetime(updated_at) <= datetime('now', '-3 minutes')`)
   ]);
   await expirePasswordResets(env);
+}
+
+async function cleanupSensitiveData(env) {
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM sessions WHERE datetime(expires_at) <= datetime('now')"),
+    env.DB.prepare("DELETE FROM rate_limit_counters WHERE datetime(expires_at) <= datetime('now')"),
+    env.DB.prepare(`DELETE FROM password_reset_requests
+      WHERE status NOT IN ('pending','approved') AND datetime(created_at) < datetime('now', '-7 days')`),
+    env.DB.prepare(`DELETE FROM payment_qr_codes WHERE ride_id IN (
+      SELECT id FROM rides WHERE status IN ('completed','cancelled')
+      AND datetime(COALESCE(completed_at, last_activity_at, created_at)) < datetime('now', '-1 day')
+    )`),
+    env.DB.prepare(`UPDATE rides SET
+      origin_lat = ROUND(origin_lat, 2), origin_lng = ROUND(origin_lng, 2),
+      destination_lat = ROUND(destination_lat, 2), destination_lng = ROUND(destination_lng, 2),
+      anonymized_at = CURRENT_TIMESTAMP
+      WHERE anonymized_at IS NULL AND status IN ('completed','cancelled')
+      AND datetime(COALESCE(completed_at, last_activity_at, created_at)) < datetime('now', '-30 days')`),
+    env.DB.prepare("DELETE FROM webhook_events WHERE datetime(processed_at) < datetime('now', '-30 days')"),
+    env.DB.prepare("DELETE FROM security_audit_log WHERE datetime(created_at) < datetime('now', '-180 days')"),
+    env.DB.prepare(`DELETE FROM driver_locations
+      WHERE is_online = 0 AND datetime(updated_at) < datetime('now', '-30 days')`)
+  ]);
 }
 
 function publicMapCacheKey(kind, value) {
@@ -566,11 +637,13 @@ async function updateDriverStatus(request, env) {
       AND status NOT IN ('completed','cancelled') LIMIT 1`).bind(user.id).first();
     if (passengerRide) return json({ error: "Finalize ou cancele sua corrida como passageiro antes de ficar disponível." }, 409);
   }
+  const storedLat = online && Number.isFinite(lat) ? lat : 0;
+  const storedLng = online && Number.isFinite(lng) ? lng : 0;
   await env.DB.prepare(`INSERT INTO driver_locations (driver_id, latitude, longitude, is_online, updated_at)
     VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(driver_id) DO UPDATE SET latitude = excluded.latitude, longitude = excluded.longitude,
     is_online = excluded.is_online, updated_at = CURRENT_TIMESTAMP`)
-    .bind(user.id, Number.isFinite(lat) ? lat : -2.79333, Number.isFinite(lng) ? lng : -57.07, online ? 1 : 0).run();
+    .bind(user.id, storedLat, storedLng, online ? 1 : 0).run();
   if (online) {
     await env.DB.prepare(`UPDATE rides SET last_activity_at = CURRENT_TIMESTAMP
       WHERE driver_id = ? AND status = 'accepted'`).bind(user.id).run();
@@ -675,12 +748,12 @@ async function nearbyDrivers(request, env, url) {
     FROM driver_locations dl JOIN users u ON u.id = dl.driver_id
     WHERE dl.is_online = 1 AND u.driver_status = 'approved' AND u.vehicle_type = ?
     AND datetime(dl.updated_at) >= datetime('now', '-3 minutes')`).bind(vehicle).all();
-  const drivers = (rows.results || []).map(row => ({
-    id: row.id,
+  const drivers = (rows.results || []).slice(0, 12).map(row => ({
+    id: `nearby-${String(row.id).slice(-8)}`,
     name: firstName(row.name),
     vehicleType: row.vehicle_type,
-    latitude: row.latitude,
-    longitude: row.longitude,
+    latitude: round(Number(row.latitude), 3),
+    longitude: round(Number(row.longitude), 3),
     distanceKm: round(haversineKm({ lat, lng }, { lat: row.latitude, lng: row.longitude }), 2)
   })).sort((a, b) => a.distanceKm - b.distanceKm);
   return json({ drivers });
@@ -735,7 +808,7 @@ async function availableRides(request, env) {
     WHERE r.status = 'searching' AND r.vehicle_type = ? AND r.passenger_id != ?
     ORDER BY r.created_at ASC LIMIT 20`).bind(user.vehicle_type, user.id).all();
   const rides = (rows.results || []).map(row => ({
-    ...publicRide(row),
+    ...publicRideOffer(row),
     passengerName: firstName(row.passenger_name),
     cashChargeCents: row.platform_share_cents + row.fixed_fee_cents,
     pickupDistanceKm: round(haversineKm({ lat: location.latitude, lng: location.longitude }, { lat: row.origin_lat, lng: row.origin_lng }), 2)
@@ -904,7 +977,7 @@ async function adminSummary(request, env) {
 async function adminDrivers(request, env) {
   const admin = await requireRole(request, env, "admin");
   if (admin instanceof Response) return admin;
-  const rows = await env.DB.prepare(`SELECT id, name, phone, cpf, status, driver_status, vehicle_type,
+  const rows = await env.DB.prepare(`SELECT id, name, phone, status, driver_status, vehicle_type,
     vehicle_model, pix_key_type, profile_photo, vehicle_photo, created_at
     FROM users WHERE driver_status IS NOT NULL ORDER BY created_at DESC`).all();
   return json({ drivers: rows.results || [] });
@@ -914,7 +987,7 @@ async function adminOperations(request, env) {
   const admin = await requireRole(request, env, "admin");
   if (admin instanceof Response) return admin;
   const [onlineDrivers, activeRides] = await env.DB.batch([
-    env.DB.prepare(`SELECT u.id, u.name, u.phone, u.vehicle_type, u.vehicle_model,
+    env.DB.prepare(`SELECT u.id, u.name, u.vehicle_type, u.vehicle_model,
       dl.latitude, dl.longitude, dl.updated_at
       FROM driver_locations dl
       JOIN users u ON u.id = dl.driver_id
@@ -924,8 +997,8 @@ async function adminOperations(request, env) {
     env.DB.prepare(`SELECT r.id, r.vehicle_type, r.status, r.payment_method,
       r.origin_lat, r.origin_lng, r.destination_lat, r.destination_lng,
       r.distance_km, r.duration_minutes, r.total_cents, r.created_at,
-      passenger.name AS passenger_name, passenger.phone AS passenger_phone,
-      driver.name AS driver_name, driver.phone AS driver_phone
+      passenger.name AS passenger_name,
+      driver.name AS driver_name
       FROM rides r
       JOIN users passenger ON passenger.id = r.passenger_id
       LEFT JOIN users driver ON driver.id = r.driver_id
@@ -939,84 +1012,6 @@ async function adminOperations(request, env) {
   });
 }
 
-async function createDemoUsers(request, env) {
-  const admin = await requireRole(request, env, "admin");
-  if (admin instanceof Response) return admin;
-  const environment = String(env.ASAAS_ENVIRONMENT || "sandbox").trim().toLowerCase();
-  if (environment !== "sandbox") {
-    return json({ error: "As contas de demonstração só podem ser criadas enquanto o Asaas estiver no Sandbox." }, 403);
-  }
-
-  const passenger = DEMO_USERS[0];
-  const driver = DEMO_USERS[1];
-  const occupied = await env.DB.prepare(`SELECT id, name, phone, cpf FROM users
-    WHERE id IN (?, ?) OR phone IN (?, ?) OR cpf IN (?, ?)`).bind(
-      passenger.id, driver.id,
-      passenger.phone, driver.phone,
-      passenger.cpf, driver.cpf
-    ).all();
-  const reservedPhones = new Map(DEMO_USERS.map(user => [user.phone, user.id]));
-  const reservedCpfs = new Map(DEMO_USERS.map(user => [user.cpf, user.id]));
-  const conflict = (occupied.results || []).find(row => {
-    if (!DEMO_USERS.some(user => user.id === row.id)) return true;
-    if (reservedPhones.has(row.phone) && reservedPhones.get(row.phone) !== row.id) return true;
-    return reservedCpfs.has(row.cpf) && reservedCpfs.get(row.cpf) !== row.id;
-  });
-  if (conflict) {
-    return json({ error: `O telefone ou CPF de demonstração já pertence a ${conflict.name || "outra conta"}.` }, 409);
-  }
-
-  const credentials = await Promise.all(DEMO_USERS.map(async user => ({
-    ...user,
-    password: await hashPassword(DEMO_PASSWORD)
-  })));
-  const statements = credentials.map(user => env.DB.prepare(`INSERT INTO users
-    (id, name, phone, cpf, password_hash, password_salt, role, status, driver_status,
-     vehicle_type, vehicle_model, pix_key, pix_key_type, profile_photo, vehicle_photo,
-     passenger_tutorial_seen, driver_tutorial_seen)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, NULL, NULL, NULL, NULL, 0, 0)
-    ON CONFLICT(id) DO UPDATE SET
-      name = excluded.name,
-      phone = excluded.phone,
-      cpf = excluded.cpf,
-      password_hash = excluded.password_hash,
-      password_salt = excluded.password_salt,
-      role = excluded.role,
-      status = 'active',
-      driver_status = excluded.driver_status,
-      vehicle_type = excluded.vehicle_type,
-      vehicle_model = excluded.vehicle_model,
-      pix_key = NULL,
-      pix_key_type = NULL,
-      profile_photo = NULL,
-      vehicle_photo = NULL,
-      passenger_tutorial_seen = 0,
-      driver_tutorial_seen = 0,
-      updated_at = CURRENT_TIMESTAMP`).bind(
-        user.id, user.name, user.phone, user.cpf,
-        user.password.hash, user.password.salt, user.role,
-        user.driverStatus, user.vehicleType, user.vehicleModel
-      ));
-  statements.push(
-    env.DB.prepare("DELETE FROM sessions WHERE user_id IN (?, ?)").bind(passenger.id, driver.id),
-    env.DB.prepare("UPDATE driver_locations SET is_online = 0, updated_at = CURRENT_TIMESTAMP WHERE driver_id = ?").bind(driver.id)
-  );
-  await env.DB.batch(statements);
-
-  return json({
-    created: true,
-    environment,
-    users: DEMO_USERS.map(user => ({
-      kind: user.kind,
-      name: user.name,
-      phone: user.phone,
-      cpf: user.cpf,
-      password: DEMO_PASSWORD,
-      vehicle: user.vehicleType ? VEHICLES[user.vehicleType]?.name : null
-    }))
-  }, 201);
-}
-
 async function decideDriver(request, env, driverId, action) {
   const admin = await requireRole(request, env, "admin");
   if (admin instanceof Response) return admin;
@@ -1024,6 +1019,7 @@ async function decideDriver(request, env, driverId, action) {
   const result = await env.DB.prepare("UPDATE users SET driver_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND driver_status IS NOT NULL").bind(status, driverId).run();
   if (!result.meta?.changes) return json({ error: "Motorista não encontrado." }, 404);
   if (status !== "approved") await env.DB.prepare("UPDATE driver_locations SET is_online = 0 WHERE driver_id = ?").bind(driverId).run();
+  await auditSecurityEvent(env, admin.id, `driver_${status}`, driverId);
   return json({ status });
 }
 
@@ -1067,13 +1063,17 @@ async function ensureQrCode(env, rideId, paymentId) {
 async function asaasWebhook(request, env, ctx) {
   const receivedToken = request.headers.get("asaas-access-token") || "";
   if (!env.ASAAS_WEBHOOK_TOKEN || !(await secureEqual(receivedToken, env.ASAAS_WEBHOOK_TOKEN))) return json({ error: "Não autorizado." }, 401);
-  const event = await readJson(request);
+  const event = await readJson(request, 256_000);
   if (!event?.id || !event?.event) return json({ error: "Evento inválido." }, 400);
   const duplicate = await env.DB.prepare("SELECT event_id FROM webhook_events WHERE event_id = ?").bind(event.id).first();
   if (duplicate) return json({ ok: true, duplicate: true });
   await processAsaasEvent(env, event);
+  const safePayload = JSON.stringify({
+    paymentId: cleanText(event.payment?.id, 100) || null,
+    paymentStatus: cleanText(event.payment?.status, 60) || null
+  });
   await env.DB.prepare("INSERT OR IGNORE INTO webhook_events (event_id, event_type, payload) VALUES (?, ?, ?)")
-    .bind(event.id, event.event, JSON.stringify(event)).run();
+    .bind(cleanText(event.id, 160), cleanText(event.event, 100), safePayload).run();
   return json({ ok: true });
 }
 
@@ -1224,9 +1224,13 @@ function calculatePricing(vehicle, distanceKm, env) {
 
 async function createSessionResponse(env, user, status = 200, extra = {}) {
   const token = randomToken(32);
-  const expires = new Date(Date.now() + SESSION_SECONDS * 1000).toISOString();
+  const lifetime = user.role === "admin" ? ADMIN_SESSION_SECONDS : SESSION_SECONDS;
+  const expires = new Date(Date.now() + lifetime * 1000).toISOString();
   await env.DB.prepare("INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)").bind(await sha256(token), user.id, expires).run();
-  return json({ user: publicUser(user), ...extra }, status, { "Set-Cookie": sessionCookie(token) });
+  await env.DB.prepare(`DELETE FROM sessions WHERE token_hash IN (
+    SELECT token_hash FROM sessions WHERE user_id = ? ORDER BY datetime(created_at) DESC LIMIT -1 OFFSET 3
+  )`).bind(user.id).run();
+  return json({ user: publicUser(user), ...extra }, status, { "Set-Cookie": sessionCookie(token, lifetime) });
 }
 
 async function requireUser(request, env) {
@@ -1235,6 +1239,9 @@ async function requireUser(request, env) {
   const user = await env.DB.prepare(`SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id
     WHERE s.token_hash = ? AND datetime(s.expires_at) > datetime('now') LIMIT 1`).bind(await sha256(token)).first();
   if (!user) return json({ error: "Sua sessão expirou. Entre novamente." }, 401, { "Set-Cookie": expiredSessionCookie() });
+  if (user.status !== "active" || user.deleted_at) {
+    return json({ error: "Esta conta não está disponível." }, 403, { "Set-Cookie": expiredSessionCookie() });
+  }
   return user;
 }
 
@@ -1279,7 +1286,7 @@ async function getRide(env, id) {
 function publicUser(user) {
   return {
     id: user.id, name: user.name, phone: user.phone, role: user.role, status: user.status,
-    cpf: user.cpf,
+    cpfMasked: maskCpf(user.cpf),
     driverStatus: driverStatus(user),
     canDrive: isApprovedDriver(user),
     vehicleType: user.vehicle_type || null, vehicleModel: user.vehicle_model || null,
@@ -1291,6 +1298,23 @@ function publicUser(user) {
       passenger: Boolean(user.passenger_tutorial_seen),
       driver: Boolean(user.driver_tutorial_seen)
     }
+  };
+}
+
+function publicRideOffer(ride) {
+  return {
+    id: ride.id,
+    vehicleType: ride.vehicle_type,
+    distanceKm: ride.distance_km,
+    durationMinutes: ride.duration_minutes,
+    fareCents: ride.fare_cents,
+    fixedFeeCents: ride.fixed_fee_cents,
+    totalCents: ride.total_cents,
+    driverShareCents: ride.driver_share_cents,
+    platformShareCents: ride.platform_share_cents,
+    paymentMethod: ride.payment_method,
+    status: ride.status,
+    createdAt: ride.created_at
   };
 }
 
@@ -1371,6 +1395,10 @@ function normalizePoint(point) {
 function isBarreirinhaPoint(lat, lng) { return Number.isFinite(lat) && Number.isFinite(lng) && lat > -2.86 && lat < -2.72 && lng > -57.16 && lng < -56.98; }
 function normalizePhone(value) { return String(value || "").replace(/\D/g, "").slice(-11); }
 function normalizeCpf(value) { return String(value || "").replace(/\D/g, "").slice(0, 11); }
+function maskCpf(value) {
+  const cpf = normalizeCpf(value);
+  return cpf.length === 11 ? `***.***.***-${cpf.slice(-2)}` : "***.***.***-**";
+}
 function cleanName(value) { return cleanText(value, 100).replace(/\s+/g, " "); }
 function cleanText(value, max = 200) { return String(value || "").trim().slice(0, max); }
 function cleanImage(value) {
@@ -1389,7 +1417,12 @@ function validateAccount({ name, phone, cpf, password }) {
   if (name.length < 3) return "Informe seu nome completo.";
   if (phone.length !== 11) return "Digite o DDD e os 9 números do celular.";
   if (!validCpf(cpf)) return "Digite um CPF válido.";
-  if (password.length < 8) return "A senha precisa ter pelo menos 8 caracteres.";
+  return validatePassword(password);
+}
+
+function validatePassword(password) {
+  if (password.length < 10) return "A senha precisa ter pelo menos 10 caracteres.";
+  if (!/[A-Za-zÀ-ÿ]/.test(password) || !/\d/.test(password)) return "Use pelo menos uma letra e um número na senha.";
   return "";
 }
 
@@ -1422,9 +1455,15 @@ async function sha256(value) {
 
 async function secureEqual(a, b) {
   if (!a || !b) return false;
-  const [left, right] = await Promise.all([sha256(String(a)), sha256(String(b))]);
-  let difference = left.length ^ right.length;
-  for (let index = 0; index < Math.max(left.length, right.length); index++) difference |= (left.charCodeAt(index) || 0) ^ (right.charCodeAt(index) || 0);
+  const encoder = new TextEncoder();
+  const [left, right] = await Promise.all([
+    crypto.subtle.digest("SHA-256", encoder.encode(String(a))),
+    crypto.subtle.digest("SHA-256", encoder.encode(String(b)))
+  ]);
+  if (typeof crypto.subtle.timingSafeEqual === "function") return crypto.subtle.timingSafeEqual(left, right);
+  const leftBytes = new Uint8Array(left), rightBytes = new Uint8Array(right);
+  let difference = 0;
+  for (let index = 0; index < leftBytes.length; index++) difference |= leftBytes[index] ^ rightBytes[index];
   return difference === 0;
 }
 
@@ -1435,9 +1474,36 @@ function cookieValue(request, name) {
   const match = cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]+)`));
   return match ? decodeURIComponent(match[1]) : "";
 }
-function sessionCookie(token) { return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${SESSION_SECONDS}`; }
+function sessionCookie(token, lifetime = SESSION_SECONDS) { return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${lifetime}`; }
 function expiredSessionCookie() { return `${SESSION_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`; }
-async function readJson(request) { try { return await request.json(); } catch { return null; } }
+async function readJson(request, maxBytes = MAX_JSON_LENGTH) {
+  try {
+    const declaredLength = Number(request.headers.get("content-length") || 0);
+    if (declaredLength > maxBytes || !request.body) return null;
+    const reader = request.body.getReader();
+    const chunks = [];
+    let total = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        return null;
+      }
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    return null;
+  }
+}
 function json(data, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(data), {
     status,
@@ -1445,9 +1511,44 @@ function json(data, status = 200, extraHeaders = {}) {
       "content-type": "application/json; charset=utf-8",
       "cache-control": "no-store",
       "x-content-type-options": "nosniff",
+      "referrer-policy": "no-referrer",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(self)",
       ...extraHeaders
     }
   });
+}
+
+function clientKind(request) {
+  return /AuraBaeAndroid/i.test(request.headers.get("user-agent") || "") ? "android" : "web";
+}
+
+async function rateLimit(request, env, scope, identity, limit, windowSeconds) {
+  const now = Date.now();
+  const windowMs = windowSeconds * 1000;
+  const windowStart = Math.floor(now / windowMs) * windowMs;
+  const ip = cleanText(request.headers.get("cf-connecting-ip") || "unknown", 80);
+  const keyHash = await sha256(`${scope}:${identity}:${ip}:${windowStart}`);
+  const windowStartedAt = new Date(windowStart).toISOString();
+  const expiresAt = new Date(windowStart + windowMs * 2).toISOString();
+  await env.DB.prepare(`INSERT INTO rate_limit_counters
+    (key_hash, scope, window_started_at, count, expires_at) VALUES (?, ?, ?, 1, ?)
+    ON CONFLICT(key_hash) DO UPDATE SET count = rate_limit_counters.count + 1`)
+    .bind(keyHash, scope, windowStartedAt, expiresAt).run();
+  const counter = await env.DB.prepare("SELECT count FROM rate_limit_counters WHERE key_hash = ? LIMIT 1").bind(keyHash).first();
+  if (Number(counter?.count || 0) <= limit) return null;
+  const retryAfter = Math.max(1, Math.ceil((windowStart + windowMs - now) / 1000));
+  return json({ error: "Muitas tentativas. Aguarde um pouco e tente novamente." }, 429, { "Retry-After": String(retryAfter) });
+}
+
+async function auditSecurityEvent(env, actorId, eventType, targetId = null, details = null) {
+  try {
+    const safeDetails = details ? cleanText(JSON.stringify(details), 500) : null;
+    await env.DB.prepare(`INSERT INTO security_audit_log
+      (id, actor_id, event_type, target_id, details) VALUES (?, ?, ?, ?, ?)`)
+      .bind(crypto.randomUUID(), actorId || null, cleanText(eventType, 100), targetId || null, safeDetails).run();
+  } catch (error) {
+    console.error(JSON.stringify({ event: "security_audit_failed", error: error?.message || String(error) }));
+  }
 }
 
 function haversineKm(a, b) {

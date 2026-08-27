@@ -10,7 +10,7 @@ e Asaas para criar cobranças Pix dinâmicas.
 - Sessão em cookie `HttpOnly`, `Secure` e `SameSite=Strict`.
 - Entrada separada para passageiro e motorista, com menus e áreas diferentes.
 - A mesma conta pode ter perfil de passageiro e também ativar um perfil de motorista.
-- Ativação automática do perfil de motorista com CPF, fotos e dados do veículo.
+- Solicitação de perfil de motorista com CPF, fotos e dados do veículo, liberada somente após aprovação administrativa.
 - Perfil completo, alteração de senha e tutoriais de primeiro acesso.
 - Recuperação de senha assistida pelo administrador com link único de 15 minutos.
 - Visual escuro simplificado em grafite e verde, com cartões de alto contraste e navegação confortável no celular.
@@ -34,11 +34,16 @@ e Asaas para criar cobranças Pix dinâmicas.
 - Limpeza automática dos pontos e da rota assim que a corrida do passageiro termina.
 - Livro-caixa interno para o saldo do motorista.
 - Rotina de repasse diário preparada, mas desligada por segurança até a homologação.
-- Duas contas de demonstração, criadas pelo administrador somente no Sandbox.
+- Aplicativo Android com mapa, câmera, localização em primeiro plano contínua e aviso nativo de novas corridas.
+- Limite de tentativas em login, cadastro e recuperação de senha.
+- Sessões limitadas a 7 dias (2 horas para administrador), com no máximo três aparelhos por conta.
+- CPF mascarado na interface, destino oculto antes do aceite e descarte automático de dados sensíveis antigos.
+- Contas de demonstração desativadas e auditoria mínima de ações administrativas.
 
 ## Estrutura
 
 - `public/`: site e PWA.
+- `android-app/`: aplicativo Android do Aura Bae.
 - `src/worker.js`: API, autenticação, corridas, Asaas e tarefas agendadas.
 - `migrations/`: banco de dados D1.
 - `wrangler.jsonc`: configuração do Cloudflare Worker.
@@ -50,6 +55,11 @@ O nome do Worker no `wrangler.jsonc` é `aura-bae`, igual ao projeto já publica
 
 Nunca coloque a chave do Asaas no código, em arquivos do projeto, no GitHub ou em
 mensagens. Cadastre-a como **Secret** no Cloudflare.
+
+Também configure `ASAAS_WEBHOOK_TOKEN` e `ADMIN_SETUP_TOKEN` como Secrets fortes e
+exclusivos. Ative autenticação em duas etapas no GitHub, Cloudflare e Asaas. O banco
+D1 é criptografado em repouso, mas segurança absoluta não existe: mantenha os acessos
+administrativos restritos, revise os registros e aplique as atualizações do projeto.
 
 O ambiente inicial é `sandbox`. Só mude para `production` depois de testar todos os
 fluxos. Os repasses automáticos também começam desligados.
@@ -64,6 +74,14 @@ npm run deploy
 ```
 
 O comando `npm run deploy` aplica primeiro as migrações do D1 e depois publica o Worker.
+
+## Android
+
+O workflow `Gerar APK Aura Bae` compila o projeto em `android-app/` e publica o arquivo
+`Aura-Bae.apk` na área de Releases do GitHub. A compilação disponibilizada agora é uma
+versão de teste assinada automaticamente pelo Android. Para publicar na Play Store,
+gere uma chave privada de produção, mantenha-a fora do repositório e envie um Android
+App Bundle (`.aab`) assinado.
 
 ## Observação sobre o mapa
 

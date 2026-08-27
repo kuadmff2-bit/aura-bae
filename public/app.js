@@ -8,6 +8,7 @@ const brl = value => {
 const supportPhone = "5597991376123";
 const platformFee = 1;
 const themeStorageKey = "aura-theme-v2.6";
+const resetTokenStorageKey = "aura-reset-token";
 const mapHome = [-2.79333, -57.07];
 const mapHomeZoom = 15;
 
@@ -28,6 +29,14 @@ let selectedVehicle = "mototaxi";
 let passengerStep = "idle";
 let passengerTimer;
 let driverOnline = false;
+
+function setNativeDriverTracking(enabled) {
+  try {
+    if (window.AuraBaeNative && typeof window.AuraBaeNative.setDriverOnline === "function") {
+      window.AuraBaeNative.setDriverOnline(Boolean(enabled));
+    }
+  } catch {}
+}
 let driverStep = "waiting";
 let driverTimer;
 let cityMap = null;
@@ -465,8 +474,8 @@ $("#reset-form").onsubmit = async event => {
   output.classList.add("hidden");
   if (password !== $("#reset-password-confirm").value) return setMessage(output, "As duas senhas precisam ser iguais.");
   try {
-    await api("/api/auth/recovery/complete", { method: "POST", body: { token: new URLSearchParams(location.search).get("reset"), password } });
-    history.replaceState({}, "", location.pathname);
+    await api("/api/auth/recovery/complete", { method: "POST", body: { token: sessionStorage.getItem(resetTokenStorageKey), password } });
+    sessionStorage.removeItem(resetTokenStorageKey);
     showAuthCard("auth-card");
     showAuthError("Senha alterada. Agora entre com a nova senha.");
   } catch (error) { setMessage(output, error.message); }
@@ -567,6 +576,7 @@ $("#logout").addEventListener("click", async () => {
   clearInterval(ridePoller); clearInterval(driverPoller);
   clearInterval(locationPoller); clearInterval(adminPoller);
   clearInterval(walletPoller);
+  setNativeDriverTracking(false);
   try { await api("/api/auth/logout", { method: "POST" }); } catch {}
   currentUser = null;
   localStorage.removeItem("aura-entry-mode");
@@ -1280,7 +1290,8 @@ function renderDriverProfile() {
     const suspended = currentUser.driverStatus === "suspended";
     $("#driver-description").textContent = suspended ? "Seu perfil de motorista está suspenso." : "Ative seu perfil de motorista na área de perfil.";
     $("#driver-panel").className = "empty pending-box";
-    $("#driver-panel").innerHTML = suspended ? `<span>!</span><h2>Perfil de motorista suspenso</h2><p>Você continua podendo usar a conta como passageiro. Fale com o suporte para revisar a suspensão.</p>` : `<span>+</span><h2>Ative o modo motorista</h2><p>Abra seu perfil, adicione as fotos e os dados do veículo. A ativação é automática.</p><button id="open-driver-profile" class="primary fit">Abrir meu perfil</button>`;
+    const pending = currentUser.driverStatus === "pending";
+    $("#driver-panel").innerHTML = suspended ? `<span>!</span><h2>Perfil de motorista suspenso</h2><p>Você continua podendo usar a conta como passageiro. Fale com o suporte para revisar a suspensão.</p>` : pending ? `<span>⌛</span><h2>Cadastro em análise</h2><p>O administrador verificará as fotos e os dados antes de liberar corridas.</p><button id="open-driver-profile" class="primary fit">Revisar meus dados</button>` : `<span>+</span><h2>Cadastre-se como motorista</h2><p>Adicione as fotos e os dados do veículo para enviar sua solicitação.</p><button id="open-driver-profile" class="primary fit">Abrir meu perfil</button>`;
     $("#open-driver-profile")?.addEventListener("click", () => showView("profile"));
   } else { $("#online-toggle").classList.remove("hidden"); renderDriverIdle(); }
 }
@@ -1324,6 +1335,7 @@ async function resumeDriverRide() {
     const result = await api("/api/rides/current?mode=driver");
     if (result.ride) {
       activeRide = result.ride; driverOnline = true;
+      setNativeDriverTracking(true);
       $("#online-toggle").classList.add("active"); $("#online-toggle").innerHTML = "<i></i> Disponível agora";
       renderDriverRide(activeRide); startDriverPolling();
     }
@@ -1389,6 +1401,7 @@ $("#online-toggle").onclick = async () => {
     }
     await api("/api/driver/status", { method: "POST", body: { online: nextOnline, latitude: coords.latitude, longitude: coords.longitude } });
     driverOnline = nextOnline;
+    setNativeDriverTracking(driverOnline);
     $("#online-toggle").classList.toggle("active", driverOnline); $("#online-toggle").innerHTML = `<i></i> ${driverOnline ? "Disponível agora" : "Ficar disponível"}`;
     if (driverOnline) startDriverPolling(); else { clearInterval(driverPoller); clearInterval(locationPoller); renderDriverIdle(); }
   } catch (error) { alert(error.message || "Não foi possível acessar sua localização."); }
@@ -1622,45 +1635,26 @@ function showRecoveryShare(result) {
   };
 }
 
-async function createDemoUsers() {
-  const button = $("#create-demo-users");
-  const output = $("#demo-users-result");
-  button.disabled = true;
-  button.textContent = "Criando contas…";
-  output.classList.add("hidden");
-  try {
-    const result = await api("/api/admin/demo-users", { method: "POST" });
-    output.innerHTML = `<p class="demo-success">Contas prontas. Envie estes dados aos seus amigos:</p>${result.users.map(user => `
-      <article class="demo-credential">
-        <div><small>${escapeHtml(user.kind)}</small><strong>${escapeHtml(user.name)}</strong>${user.vehicle ? `<span>${escapeHtml(user.vehicle)}</span>` : ""}</div>
-        <dl><div><dt>Telefone</dt><dd>${escapeHtml(phoneText(user.phone))}</dd></div><div><dt>Senha</dt><dd>${escapeHtml(user.password)}</dd></div></dl>
-        <button class="secondary" type="button" data-copy-demo="${escapeHtml(`${user.kind}: telefone ${phoneText(user.phone)}, senha ${user.password}`)}">Copiar acesso</button>
-      </article>`).join("")}`;
-    output.classList.remove("hidden");
-    $$('[data-copy-demo]').forEach(copyButton => copyButton.onclick = async () => {
-      try {
-        await navigator.clipboard.writeText(copyButton.dataset.copyDemo);
-        const previous = copyButton.textContent;
-        copyButton.textContent = "Copiado";
-        setTimeout(() => { copyButton.textContent = previous; }, 1400);
-      } catch { alert(copyButton.dataset.copyDemo); }
-    });
-    renderAdmin();
-  } catch (error) {
-    output.innerHTML = `<p class="form-error">${escapeHtml(error.message)}</p>`;
-    output.classList.remove("hidden");
-  } finally {
-    button.disabled = false;
-    button.textContent = "Criar ou redefinir contas";
-  }
-}
-
-$("#create-demo-users").onclick = createDemoUsers;
-
 function renderProfile() {
   if (!currentUser) return;
+  let deleteButton = $("#open-delete-account");
+  if (!deleteButton) {
+    deleteButton = document.createElement("button");
+    deleteButton.id = "open-delete-account";
+    deleteButton.className = "settings-button delete-account-button";
+    deleteButton.type = "button";
+    deleteButton.innerHTML = "<span>Privacidade</span><strong>Excluir minha conta</strong><i>›</i>";
+    $(".account-settings .settings-actions").append(deleteButton);
+    deleteButton.onclick = () => {
+      $("#delete-account-form").reset();
+      $("#delete-account-error").classList.add("hidden");
+      $("#delete-account-modal").classList.remove("hidden");
+      $("#delete-account-password").focus();
+    };
+  }
+  deleteButton.classList.toggle("hidden", currentUser.role === "admin");
   $("#profile-display-name").textContent = currentUser.name;
-  $("#profile-contact").textContent = `${phoneText(currentUser.phone)} • CPF ${cpfText(currentUser.cpf)}`;
+  $("#profile-contact").textContent = `${phoneText(currentUser.phone)} • CPF ${currentUser.cpfMasked || "***.***.***-**"}`;
   $("#profile-name").value = currentUser.name;
   $("#profile-avatar").innerHTML = currentUser.profilePhoto ? `<img src="${currentUser.profilePhoto}" alt="Sua foto">` : escapeHtml(initials(currentUser.name));
   renderUserBadge();
@@ -1672,11 +1666,11 @@ function renderProfile() {
   $("#replay-passenger-tutorial").classList.toggle("hidden", currentUser.role === "admin");
   if (currentUser.role === "admin") return;
   $("#driver-profile-title").textContent = currentUser.canDrive ? "Meu perfil de motorista" : "Também quer dirigir?";
-  $("#driver-profile-text").textContent = currentUser.canDrive ? "Atualize o veículo, as fotos ou a chave Pix quando precisar." : "Cadastre seus dados e comece a receber chamadas automaticamente.";
+  $("#driver-profile-text").textContent = currentUser.canDrive ? "Atualize o veículo, as fotos ou a chave Pix quando precisar." : currentUser.driverStatus === "pending" ? "Seus dados estão em análise. Você pode atualizá-los enquanto aguarda a liberação." : "Cadastre seus dados para análise antes de receber corridas.";
   $("#driver-profile-vehicle").value = currentUser.vehicleType || "mototaxi";
   $("#driver-profile-model").value = currentUser.vehicleModel || "";
   $("#driver-profile-pix-type").value = currentUser.pixKeyType || "CPF";
-  $("#driver-application-submit").textContent = currentUser.canDrive ? "Salvar dados de motorista" : "Ativar perfil de motorista";
+  $("#driver-application-submit").textContent = currentUser.canDrive ? "Salvar dados de motorista" : currentUser.driverStatus === "pending" ? "Atualizar solicitação" : "Enviar para análise";
   $("#replay-driver-tutorial").classList.toggle("hidden", !currentUser.canDrive);
   $("#open-pix-settings").classList.toggle("hidden", currentUser.role === "admin");
   $("#open-pix-settings strong").textContent = currentUser.canDrive ? "Mudar chave Pix" : "Cadastrar chave Pix";
@@ -1719,8 +1713,8 @@ $("#driver-application-form").onsubmit = async event => {
     croppedPhotoData.delete("driver-profile-photo");
     croppedPhotoData.delete("driver-vehicle-photo");
     renderNav(); renderProfile(); renderDriverProfile();
-    setMessage(output, "Perfil de motorista ativo. Você já pode ficar disponível.", true);
-    showTutorial("driver");
+    setMessage(output, result.user.canDrive ? "Dados de motorista atualizados." : "Solicitação enviada. O administrador precisa liberar seu perfil antes das corridas.", true);
+    if (result.user.canDrive) showTutorial("driver");
   } catch (error) {
     setMessage(output, error.message);
     if (error.data?.field) document.getElementById(error.data.field)?.focus();
@@ -1763,6 +1757,39 @@ $("#change-password-form").onsubmit = async event => {
     event.target.reset();
     setMessage(output, "Senha alterada. As outras sessões foram encerradas.", true);
   } catch (error) { setMessage(output, error.message); }
+};
+
+function closeDeleteAccountModal() {
+  $("#delete-account-modal").classList.add("hidden");
+  $("#delete-account-form").reset();
+}
+
+$("#keep-account").onclick = closeDeleteAccountModal;
+$("#delete-account-modal").onclick = event => {
+  if (event.target === $("#delete-account-modal")) closeDeleteAccountModal();
+};
+$("#delete-account-form").onsubmit = async event => {
+  event.preventDefault();
+  const output = $("#delete-account-error");
+  output.classList.add("hidden");
+  if ($("#delete-account-confirmation").value.trim().toUpperCase() !== "EXCLUIR") {
+    return setMessage(output, "Digite EXCLUIR para confirmar.");
+  }
+  const submit = event.submitter;
+  submit.disabled = true;
+  try {
+    await api("/api/profile/delete", {
+      method: "POST",
+      body: { password: $("#delete-account-password").value }
+    });
+    setNativeDriverTracking(false);
+    localStorage.removeItem("aura-entry-mode");
+    sessionStorage.removeItem(resetTokenStorageKey);
+    location.replace("/");
+  } catch (error) {
+    setMessage(output, error.message);
+    submit.disabled = false;
+  }
 };
 
 const tutorials = {
@@ -1818,8 +1845,10 @@ $("#support-link").onclick = () => openWhatsApp($("#support-link").dataset.whats
 
 (async () => {
   try {
-    const resetToken = new URLSearchParams(location.search).get("reset");
+    const resetToken = new URLSearchParams(location.hash.replace(/^#/, "")).get("reset");
     if (resetToken) {
+      sessionStorage.setItem(resetTokenStorageKey, resetToken);
+      history.replaceState({}, "", location.pathname + location.search);
       showAuthCard("reset-card");
       return;
     }
