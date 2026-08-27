@@ -8,7 +8,6 @@
         <item name="android:windowSplashScreenBackground">@color/aura_background</item>
         <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
         <item name="android:windowSplashScreenIconBackgroundColor">@color/aura_green_dark</item>
-        <item name="android:postSplashScreenTheme">@style/Theme.AuraBae</item>
         <item name="android:colorAccent">@color/aura_green</item>
     </style>
 </resources>
