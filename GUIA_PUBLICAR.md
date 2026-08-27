@@ -89,7 +89,7 @@ Preencha:
 
 - o mesmo valor salvo em `ADMIN_SETUP_TOKEN`;
 - nome, telefone e CPF do administrador;
-- uma senha forte com no mínimo 8 caracteres.
+- uma senha forte com no mínimo 10 caracteres, contendo letra e número.
 
 A tela de configuração desaparece depois que o primeiro administrador é criado.
 
@@ -120,26 +120,19 @@ O sistema só considera o Pix pago quando recebe `PAYMENT_RECEIVED`.
 
 ## 7. Teste com passageiro e motorista
 
-Na Central de Operações do administrador, abra **Usuários de demonstração** e
-toque em **Criar ou redefinir contas**. O botão funciona somente no Sandbox e
-mostra os acessos que você pode enviar aos seus amigos:
+As contas de demonstração com senha conhecida foram removidas. Crie contas próprias
+de teste, sem reutilizar CPF, telefone ou senha de pessoas reais.
 
-| Perfil | Telefone | Senha |
-|---|---|---|
-| Passageiro | `(92) 90000-0001` | `Aura@2026` |
-| Motorista (mototáxi) | `(92) 90000-0002` | `Aura@2026` |
-
-Cada vez que você tocar no botão, a senha volta para o valor acima e as sessões
-antigas dessas contas são encerradas.
-
-1. Entre como passageiro para pedir corridas ou como motorista para trabalhar. Uma conta de passageiro também pode ativar o perfil de motorista com CPF, veículo, fotos e chave Pix.
-2. A ativação é automática; permita a localização e toque em **Ficar disponível**.
-3. Confira no mapa administrativo se o motorista aparece online.
-4. Em outro aparelho, cadastre um passageiro e solicite a corrida.
-5. O motorista aceita, inicia e confirma a chegada.
-6. Acompanhe a rota e a situação da corrida na Central de Operações.
-7. Nesse momento o QR Code Pix é criado.
-8. Após o webhook confirmar o recebimento, o passageiro avalia a corrida.
+1. Cadastre uma conta de passageiro de teste.
+2. Cadastre outra conta como motorista, com veículo, fotos e uma chave Pix de teste.
+3. Entre como administrador, confira os dados e aprove o motorista. Sem essa aprovação ele não recebe chamadas.
+4. No aparelho do motorista aprovado, permita a localização e toque em **Ficar disponível**.
+5. Confira no mapa administrativo se o motorista aparece online.
+6. Em outro aparelho, entre como passageiro e solicite a corrida.
+7. O motorista vê apenas distância e valor antes do aceite; depois de aceitar, recebe a rota exata.
+8. O motorista inicia e confirma a chegada.
+9. Nesse momento o QR Code Pix é criado.
+10. Após o webhook confirmar o recebimento, o passageiro avalia a corrida.
 
 ## Corridas em dinheiro e carteira do motorista
 
