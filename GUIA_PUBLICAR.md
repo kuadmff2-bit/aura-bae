@@ -103,7 +103,7 @@ Use:
 
 - Nome: `Aura Bae - Pagamentos`;
 - URL: `https://SEU-WORKER.workers.dev/webhooks/asaas`;
-- E-mail: `kuadmff2@gmail.com`;
+- E-mail: o e-mail cadastrado na sua conta Asaas;
 - Token: exatamente o valor salvo em `ASAAS_WEBHOOK_TOKEN`;
 - Tipo de envio: sequencial;
 - Ativado: sim;

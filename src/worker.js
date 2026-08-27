@@ -116,8 +116,8 @@ async function setupAdmin(request, env) {
   if (!body || !(await secureEqual(String(body.setupToken || ""), String(env.ADMIN_SETUP_TOKEN || "")))) {
     return json({ error: "Token de configuração inválido." }, 403);
   }
-  const name = cleanName(body.name || env.ADMIN_NAME);
-  const phone = normalizePhone(body.phone || env.ADMIN_PHONE);
+  const name = cleanName(body.name);
+  const phone = normalizePhone(body.phone);
   const cpf = normalizeCpf(body.cpf);
   const password = String(body.password || "");
   const validation = validateAccount({ name, phone, cpf, password });
@@ -513,7 +513,7 @@ async function searchMapPlaces(request, env, ctx, url) {
   const response = await fetch(endpoint, {
     headers: {
       "accept": "application/json",
-      "user-agent": "AuraBae/1.0 (kuadmff2@gmail.com)"
+      "user-agent": "AuraBae/2.7"
     }
   });
   if (!response.ok) return json({ error: "A pesquisa de lugares está temporariamente indisponível. Você ainda pode marcar no mapa." }, 503);
@@ -549,7 +549,7 @@ async function reverseMapPlace(request, env, ctx, url) {
     const response = await fetch(endpoint, {
       headers: {
         "accept": "application/json",
-        "user-agent": "AuraBae/1.0 (kuadmff2@gmail.com)"
+        "user-agent": "AuraBae/2.7"
       }
     });
     const data = response.ok ? await response.json() : null;
@@ -592,7 +592,7 @@ async function mapPointsOfInterest(request, env, ctx) {
       headers: {
         "accept": "application/json",
         "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
-        "user-agent": "AuraBae/2.6 (kuadmff2@gmail.com)"
+        "user-agent": "AuraBae/2.7"
       },
       body: new URLSearchParams({ data: query }).toString()
     });
@@ -1173,7 +1173,7 @@ async function asaasFetch(env, path, options = {}) {
       "accept": "application/json",
       "content-type": "application/json",
       "access_token": env.ASAAS_API_KEY,
-      "user-agent": "AuraBae/1.0 (kuadmff2@gmail.com)"
+      "user-agent": "AuraBae/2.7"
     },
     body: options.body ? JSON.stringify(options.body) : undefined
   });

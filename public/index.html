@@ -46,8 +46,8 @@
         <p class="muted">Faça isso apenas uma vez, logo após publicar o backend.</p>
         <form id="setup-form">
           <label>Token de configuração<div class="password-field"><input id="setup-token" type="password" autocomplete="off" placeholder="Token salvo no Cloudflare"><button class="password-toggle" type="button" data-password-target="setup-token" aria-label="Mostrar token" aria-pressed="false">Mostrar</button></div></label>
-          <label>Nome completo<input id="setup-name" value="Carlos Olímpio" autocomplete="name"></label>
-          <label>Telefone<input id="setup-phone" inputmode="numeric" value="97991376123"></label>
+          <label>Nome completo<input id="setup-name" autocomplete="name" placeholder="Nome do administrador"></label>
+          <label>Telefone<input id="setup-phone" inputmode="numeric" placeholder="DDD e número"></label>
           <label>CPF<input id="setup-cpf" inputmode="numeric" maxlength="14" placeholder="000.000.000-00"></label>
           <label>Crie sua senha de administrador<div class="password-field"><input id="setup-password" type="password" minlength="10" autocomplete="new-password" placeholder="Mínimo de 10 caracteres"><button class="password-toggle" type="button" data-password-target="setup-password" aria-label="Mostrar senha" aria-pressed="false">Mostrar</button></div></label>
           <p id="setup-error" class="form-error hidden"></p>
