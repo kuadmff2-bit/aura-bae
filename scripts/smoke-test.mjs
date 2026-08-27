@@ -53,7 +53,7 @@ class D1Memory {
 }
 
 const database = new D1Memory();
-for (const migration of ["0001_initial.sql", "0002_accounts_profiles_recovery.sql", "0003_driver_wallet.sql", "0004_security_hardening.sql"]) {
+for (const migration of ["0001_initial.sql", "0002_accounts_profiles_recovery.sql", "0003_driver_wallet.sql", "0004_security_hardening.sql", "0005_revoke_legacy_access.sql"]) {
   database.exec(fs.readFileSync(new URL(`../migrations/${migration}`, import.meta.url), "utf8"));
 }
 

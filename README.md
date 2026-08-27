@@ -39,6 +39,7 @@ e Asaas para criar cobranças Pix dinâmicas.
 - Sessões limitadas a 7 dias (2 horas para administrador), com no máximo três aparelhos por conta.
 - CPF mascarado na interface, destino oculto antes do aceite e descarte automático de dados sensíveis antigos.
 - Contas de demonstração desativadas e auditoria mínima de ações administrativas.
+- Sessões antigas revogadas e motoristas liberados por versões anteriores devolvidos à análise administrativa.
 
 ## Estrutura
 

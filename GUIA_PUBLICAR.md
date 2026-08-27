@@ -24,7 +24,10 @@ Esta é a opção certa para a instalação que já está funcionando:
 5. No Cloudflare, abra **Deployments** e acompanhe a nova implantação. Se ela não
    começar automaticamente, use **Retry build**.
 6. O comando `npm run deploy` verificará as migrações do banco antes de publicar
-   a versão 2.6 do site.
+   a versão 2.7 do site.
+7. Nesta atualização de segurança, todas as sessões antigas serão encerradas e os
+   motoristas aprovados pela versão antiga voltarão para **análise**. Entre novamente
+   como administrador e aprove somente os motoristas que você reconhece.
 
 Como o nome do Worker continua sendo `aura-bae`, o endereço do webhook do Asaas
 permanece o mesmo. Não crie outro Worker e não troque a URL do webhook.
